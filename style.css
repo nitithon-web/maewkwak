@@ -2298,3 +2298,6 @@ body[data-bg="photo"][data-soft="1"]::before { filter: blur(5px); inset: -16px; 
 .fs-lg .resched { flex-wrap: wrap; }
 .ui-seg button { white-space: normal; line-height: 1.25; }
 .fs-lg .mo-sec .sec-ico { display: none; }
+/* ส่วนลด: เลือกว่าส่วนลดท้ายบิลลดเมนูไหน */
+.disc-hint { margin: 0 12px 6px; font-size: calc(12px * var(--fs, 1)); color: var(--muted); }
+.disc-r .disc-move { display: block; margin-top: 6px; width: 100%; max-width: 260px; font-size: calc(13px * var(--fs, 1)); padding: 6px 8px; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--save) 40%, var(--line)); background: var(--card); color: var(--text); }

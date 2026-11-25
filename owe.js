@@ -468,21 +468,54 @@ const num = sS => fromS(sS).toLocaleString('th-TH', { maximumFractionDigits: 2 }
 /* ส่วนลดทั้งหมดของบิลหาร: ส่วนลดรายเมนู + ส่วนลดท้ายบิล → กล่องกดดูได้ว่าลดจากอะไรบ้าง */
 function discBox(bills, people, key) {
   const rows = [];
-  (bills || []).forEach(b => {
+  let loose = 0;
+  (bills || []).forEach((b, bi) => {
     const tag = bills.length > 1 && b.title ? ` · ${b.title}` : '';
     if (b.method === 'menu') (b.items || []).forEach(it => {
       if (DISC_RE.test(it.name || '') && !(it.who || []).filter(p => people.includes(p)).length) return;   // บรรทัดส่วนลดแบบเก่า = แค่ชื่อของส่วนลดท้ายบิล ไม่นับซ้ำ
       if (!toS(it.disc)) return;
       const w = (it.who || []).filter(p => people.includes(p));
-      rows.push({ t: (it.name || 'เมนู') + tag, n: it.discNote || '', s: toS(it.disc), w: w.length > 1 ? `คนละ −${num(apportion(toS(it.disc), w.map(() => 1))[0])}` : (w[0] ? who(w[0]) : '') });
+      const by = w.length > 1 ? (w.length === people.length ? 'ทุกคน' : w.map(who).join(', ')) + ' (หารเท่ากัน)' : (w[0] ? who(w[0]) : 'ยังไม่มีคนกิน');
+      const named = Array.isArray(it.discs) && it.discs.length && it.discs.reduce((x, d) => x + toS(d.a), 0) === toS(it.disc);
+      if (named) it.discs.forEach(d => rows.push({ t: d.n || 'ส่วนลด', n: `ลด ${it.name || 'เมนู'}${tag} · ${by}`, s: toS(d.a) }));
+      else rows.push({ t: it.discNote || 'ส่วนลด', n: `ลด ${it.name || 'เมนู'}${tag} · ${by}`, s: toS(it.disc) });
     });
-    if (toS(b.disc)) rows.push({ t: (oldDiscNames(b, people) || 'ส่วนลดท้ายบิล') + tag, n: '', s: toS(b.disc), w: 'หารตามสัดส่วนที่กิน' });
+    if (!toS(b.disc)) return;
+    const named = Array.isArray(b.discs) && b.discs.length && b.discs.reduce((x, d) => x + toS(d.a), 0) === toS(b.disc);
+    const list = named ? b.discs.map((d, di) => ({ name: d.n || 'ส่วนลด', s: toS(d.a), di })) : [{ name: oldDiscNames(b, people) || 'ส่วนลดท้ายบิล', s: toS(b.disc), di: -1 }];
+    list.forEach(d => {
+      const canMove = key === 'edit' && b.method === 'menu' && (b.items || []).some(it => toS(it.price));
+      if (canMove) loose++;
+      rows.push({ t: d.name + tag, n: b.method === 'menu' ? 'ยังไม่รู้ว่าลดเมนูไหน · ตอนนี้หารตามสัดส่วนที่กิน' : 'หักจากยอดรวม', s: d.s,
+        sel: canMove ? `<select class="disc-move" data-b="${bi}" data-d="${d.di}" aria-label="ส่วนลดนี้ลดเมนูไหน"><option value="">ลดให้ทุกคนตามสัดส่วน</option>${b.items.map((it, ii) => toS(it.price) ? `<option value="${ii}">ลด ${esc(it.name || 'เมนู ' + (ii + 1))}</option>` : '').join('')}</select>` : '' });
+    });
   });
   if (!rows.length) return '';
   const tot = rows.reduce((x, r) => x + r.s, 0);
-  return `<details class="disc-box"${discOpen[key] ? ' open' : ''} data-key="${key}"><summary><span>🏷 ส่วนลดรวม <small>${rows.length} รายการ · แตะดู</small></span><b>−${bahtS(tot)}</b></summary>
-    ${rows.map(r => `<div class="disc-r"><span>${esc(r.t)}<small>${esc([r.n, r.w].filter(Boolean).join(' · '))}</small></span><b>−${num(r.s)}</b></div>`).join('')}</details>`;
+  const open = discOpen[key] !== undefined ? discOpen[key] : loose > 0;
+  return `<details class="disc-box"${open ? ' open' : ''} data-key="${key}"><summary><span>🏷 ส่วนลดรวม <small>${rows.length} รายการ · แตะดู</small></span><b>−${bahtS(tot)}</b></summary>
+    ${loose ? '<p class="disc-hint">ส่วนลดที่ยังไม่รู้ว่าลดเมนูไหน เลือกเมนูได้ แล้วส่วนลดจะหักเฉพาะคนที่กินเมนูนั้น</p>' : ''}
+    ${rows.map(r => `<div class="disc-r"><span>${esc(r.t)}<small>${esc(r.n)}</small>${r.sel || ''}</span><b>−${num(r.s)}</b></div>`).join('')}</details>`;
 }
+/* ย้ายส่วนลดท้ายบิลไปเป็นส่วนลดของเมนูที่เลือก */
+document.addEventListener('change', e => {
+  const sel = e.target.closest && e.target.closest('.disc-move');
+  if (!sel || sel.value === '' || typeof sp === 'undefined') return;
+  const b = sp.bills[+sel.dataset.b], di = +sel.dataset.d, it = b && b.items[+sel.value];
+  if (!b || !it) return;
+  const d = di >= 0 && b.discs ? b.discs[di] : { n: oldDiscNames(b, sp.people) || 'ส่วนลดท้ายบิล', a: b.disc };
+  const aS = toS(d.a);
+  if (aS > itemNetS(it)) { alert(`ส่วนลด ${num(aS)} มากกว่าราคาที่เหลือของ "${it.name || 'เมนู'}" (${num(itemNetS(it))}) เลือกเมนูอื่น หรือแก้ราคาก่อน`); sel.value = ''; return; }
+  if (!Array.isArray(it.discs)) it.discs = toS(it.disc) ? [{ n: it.discNote || 'ส่วนลด', a: it.disc }] : [];
+  it.discs.push({ n: d.n, a: String(fromS(aS)) });
+  it.disc = String(fromS(toS(it.disc) + aS));
+  it.discNote = it.discs.map(x => x.n).join(', ');
+  if (di >= 0 && b.discs) b.discs.splice(di, 1); else b.discs = [];
+  const left = toS(b.disc) - aS;
+  b.disc = left > 0 ? String(fromS(left)) : '';
+  if (!left) b.discs = [];
+  paintSplit();
+});
 const discOpen = {};
 /* ชื่อบรรทัดส่วนลดแบบเก่า (AI เคยอ่านเป็นเมนูที่ไม่มีใครกิน) ใช้เป็นชื่อของส่วนลดท้ายบิล */
 const oldDiscNames = (b, people) => (b.items || []).filter(it => DISC_RE.test(it.name || '') && !(it.who || []).filter(p => people.includes(p)).length).map(it => it.name).join(', ');
@@ -591,13 +624,13 @@ function paintSplit() {
         const it = b.items[+row.dataset.i];
         row.querySelector('.s-iname').oninput = e => { it.name = e.target.value; };
         row.querySelector('.s-iprice').oninput = e => { it.price = e.target.value; paintSum(); };
-        row.querySelector('.s-idisc').oninput = e => { it.disc = e.target.value; e.target.parentNode.classList.toggle('on', !!toS(it.disc)); paintSum(); };
+        row.querySelector('.s-idisc').oninput = e => { it.disc = e.target.value; it.discs = null; e.target.parentNode.classList.toggle('on', !!toS(it.disc)); paintSum(); };
         row.querySelector('.s-irm').onclick = () => { b.items.splice(+row.dataset.i, 1); paintSplit(); };
         row.querySelector('.s-iwho').onclick = e => { const c = e.target.closest('button'); if (!c) return; const p = c.dataset.p; it.who = it.who.includes(p) ? it.who.filter(x => x !== p) : [...it.who, p]; it.all = it.who.length === sp.people.length; c.classList.toggle('on'); paintSum(); };
       });
       body.querySelector('.s-iadd').onclick = () => { b.items.push({ name: '', price: '', who: [...sp.people], all: true }); paintSplit(); setTimeout(() => { const ins = el.querySelectorAll('.s-iname'); ins[ins.length - 1]?.focus(); }, 30); };
       body.querySelector('.s-extra').onclick = e => { const c = e.target.closest('button'); if (!c) return; b[c.dataset.x] = !b[c.dataset.x]; c.classList.toggle('on'); paintSum(); };
-      body.querySelector('.s-disc').oninput = e => { b.disc = e.target.value; paintSum(); };
+      body.querySelector('.s-disc').oninput = e => { b.disc = e.target.value; b.discs = null; paintSum(); };
     }
     el.querySelector('.s-payer').onchange = e => { b.payer = e.target.value; paintSum(); };
     el.querySelector('.s-read').onclick = () => readReceiptFor(b);
@@ -646,11 +679,12 @@ async function onReceiptFile(e) {
       b.method = 'menu';
       b.items = [];
       let extraDisc = 0;
+      const billDiscs = (o.discList || []).map(d => ({ n: d.n, a: String(d.a) }));
       items.forEach(it => {
         // บรรทัดส่วนลดที่ AI แยกมาเป็นเมนู → ย้ายไปเป็นส่วนลดของเมนูก่อนหน้า (ไม่มีให้เป็นส่วนลดท้ายบิล)
         // ส่วนลดที่ไม่ระบุเมนู (เช่น Meal Deal) = ส่วนลดท้ายบิล หารตามสัดส่วนที่กิน
-        if (DISC_RE.test(it.name)) { const prev = discTarget(it.name, b.items); if (prev) { prev.disc = String(fromS(toS(prev.disc) + toS(it.price))); prev.discNote = prev.discNote ? prev.discNote + ', ' + it.name : it.name; } else extraDisc += it.price; return; }
-        b.items.push({ name: (it.qty > 1 ? it.qty + '× ' : '') + it.name, price: String(it.price), disc: it.disc ? String(it.disc) : '', discNote: it.discNote || '', who: [...sp.people], all: true });
+        if (DISC_RE.test(it.name)) { const prev = discTarget(it.name, b.items); if (prev) { prev.disc = String(fromS(toS(prev.disc) + toS(it.price))); prev.discNote = prev.discNote ? prev.discNote + ', ' + it.name : it.name; (prev.discs = prev.discs || []).push({ n: it.name, a: String(it.price) }); } else { extraDisc += it.price; billDiscs.push({ n: it.name, a: String(it.price) }); } return; }
+        b.items.push({ name: (it.qty > 1 ? it.qty + '× ' : '') + it.name, price: String(it.price), disc: it.disc ? String(it.disc) : '', discNote: it.discNote || '', discs: (it.discs || []).map(d => ({ n: d.n, a: String(d.a) })), who: [...sp.people], all: true });
       });
       // ค่าบริการ / VAT ที่ยังไม่รวมในราคาเมนู
       const itemSum = items.filter(it => !DISC_RE.test(it.name)).reduce((s2, it) => s2 + it.price, 0);
@@ -659,7 +693,8 @@ async function onReceiptFile(e) {
       if (discSum && Math.abs(Number(o.amount || 0) - itemSum) < 0.5) b.rTotal = Math.round((itemSum - discSum) * 100) / 100;
       b.svc = !!o.service && Math.abs(o.service - itemSum * 0.1) <= Math.max(2, itemSum * 0.01);
       b.vat = o.vat === 'yes' && o.pricesIncVat === false;
-      if (o.discount || extraDisc) b.disc = String((o.discount || 0) + extraDisc);
+      if (o.discount || extraDisc) { b.disc = String((o.discount || 0) + extraDisc); b.discs = billDiscs.length ? billDiscs : [{ n: 'ส่วนลดท้ายบิล', a: b.disc }]; }
+      else { b.disc = ''; b.discs = []; }
     } else if (o.amount) { b.method = 'equal'; b.total = String(o.amount); }
     paintSplit();
     const msg = !r.ai ? '⚠️ ยังไม่ได้ตั้งค่า AI (อ่านแบบเดิม) ตรวจรายการอีกครั้ง'
@@ -937,7 +972,9 @@ function paintDetail() {
         ((b.svc || b.vat || toS(b.disc)) ? `<div class="di-r sub sum"><span>รวมค่าอาหาร</span><b>${bahtS(subS)}</b></div>` : '') +
         (b.svc ? `<div class="di-r sub"><span>Service 10%</span><b>${bahtS(Math.round(subS * 0.1))}</b></div>` : '') +
         (b.vat ? `<div class="di-r sub"><span>VAT 7%</span><b>${bahtS(Math.round(subS * (b.svc ? 1.1 : 1) * 0.07))}</b></div>` : '') +
-        (toS(b.disc) ? `<div class="di-r sub disc"><span>🏷 ${esc(oldNames || 'ส่วนลดท้ายบิล')}</span><b>−${bahtS(toS(b.disc))}</b></div>` : '');
+        (toS(b.disc) ? (Array.isArray(b.discs) && b.discs.length && b.discs.reduce((x, d) => x + toS(d.a), 0) === toS(b.disc)
+          ? b.discs.map(d => `<div class="di-r sub disc"><span>🏷 ${esc(d.n || 'ส่วนลด')}<small>หารตามสัดส่วนที่กิน</small></span><b>−${bahtS(toS(d.a))}</b></div>`).join('')
+          : `<div class="di-r sub disc"><span>🏷 ${esc(oldNames || 'ส่วนลดท้ายบิล')}</span><b>−${bahtS(toS(b.disc))}</b></div>`) : '');
     } else if (b.method === 'custom') {
       body = `<div class="di-r"><span>ระบุยอดเองรายคน</span><b></b></div>`;
       Object.keys(b.shares || {}).forEach(p => { (eaten[p] = eaten[p] || []).push(esc(bills.length > 1 ? (b.title || 'บิล') + ' (ระบุเอง)' : 'ระบุยอดเอง')); });
