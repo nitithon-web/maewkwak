@@ -318,8 +318,8 @@ function grpHandle_(ev) {
   }
   if (/^(วิธีใช้|ช่วย|help)$/i.test(text)) return grpReplyMsgs_(ev.replyToken, [grpText_(GRP_HELP), hkSummonFlex_(gid)]);
   if (/^(กองกลาง|กอง)$/.test(text)) {   // 🏦 สรุปกองกลางที่เปิดอยู่ในกลุ่มนี้
-    const pls = poolList_(gid).filter(x => x.status === 'open');
-    return grpReplyMsgs_(ev.replyToken, pls.length ? pls.slice(0, 5).map(x => poolFlex_(x)) : [grpText_('ยังไม่มีกองกลางที่เปิดอยู่ในกลุ่มนี้\nสร้างได้ในหน้าหารกัน: พิมพ์ แมวกวัก แล้วกด ยอดของฉัน → + สร้างกองกลาง')]);
+    const rows = grpRows_(true), pls = poolList_(gid, rows).filter(x => x.status === 'open');
+    return grpReplyMsgs_(ev.replyToken, pls.length ? pls.slice(0, 5).map(x => poolFlex_(x, null, '', rows)) : [grpText_('ยังไม่มีกองกลางที่เปิดอยู่ในกลุ่มนี้\nสร้างได้ในหน้าหารกัน: พิมพ์ แมวกวัก แล้วกด ยอดของฉัน → + สร้างกองกลาง')]);
   }
   if (/^(หาร|หารกัน|แมวกวัก|น้องแมว)$/.test(text) || (tagBot && !GRP_CMD.test(text))) return grpReplyMsgs_(ev.replyToken, hkSummonFlex_(gid));
 
@@ -533,7 +533,7 @@ function grpNag_(gid, q) {
 }
 
 function grpVoid_(gid, uid, isOwner) {
-  const open = grpBills_(gid).filter(b => b.payer.uid === uid || isOwner);
+  const open = grpBills_(gid).filter(b => !b.poolRole && (b.payer.uid === uid || isOwner));   // บิลของกองกลางไม่ลบด้วยคำสั่งพิมพ์
   if (!open.length) return 'ไม่มีบิลที่เราลบได้ (ลบได้เฉพาะบิลที่เราเป็นคนจ่ายก่อน)';
   const b = open.sort((x, y) => String(y.created).localeCompare(String(x.created)))[0];
   hkVoidBill_(b);
@@ -731,8 +731,18 @@ function hkApi_(body) {
       case 'hk_pool_new': return poolNew_(me, grp, body);
       case 'hk_pool':   return { pool: poolView_(poolGet_(body.p, grp), me) };
       case 'hk_pool_close': return poolClose_(me, poolGet_(body.p, grp));
+      case 'hk_pool_add': return poolAdd_(me, grp, poolGet_(body.p, grp), body);
+      case 'hk_pool_ok': return poolOk_(me, poolGet_(body.p, grp), body);
+      case 'hk_pool_cancel': return poolCancel_(me, poolGet_(body.p, grp));
+      case 'hk_pool_card': return poolCard_(me, poolGet_(body.p, grp));
       case 'hk_refund': return poolRefund_(me, poolGet_(body.p, grp), body);
-      case 'hk_void':   { const b = hkGet_(body.b, grp); if (b.payer.uid !== me.uid) throw new Error('ลบได้เฉพาะคนจ่ายก่อน'); hkVoidBill_(b); return { done: true }; }
+      case 'hk_void':   {
+        const b = hkGet_(body.b, grp);
+        if (b.payer.uid !== me.uid) throw new Error('ลบได้เฉพาะคนจ่ายก่อน');
+        poolBillGuard_(b, 'ลบ');
+        hkVoidBill_(b);
+        return b.poolRole ? { done: true, pool: poolView_(poolGet_(b.pool), me) } : { done: true };
+      }
       case 'hk_slip':   return hkSlipGet_(me, hkGet_(body.b, grp), String(body.k || ''));
       case 'hk_qrimg':  return hkQrImg_(me, hkGet_(body.b, grp));
       case 'hk_rcptimg': return hkRcptImg_(me, hkGet_(body.b, grp));
@@ -776,7 +786,8 @@ function hkView_(b, me) {
 function hkHome_(me, grp) {
   const cfg = grpCfg_(), today = todayStr_();
   const owe = [], get = [];
-  grpRows_().filter(b => b.status !== 'void' && b.status !== 'pool').forEach(b => {
+  const all = grpRows_(true), rows = all.filter(b => b.kind !== 'pool');
+  rows.filter(b => b.status !== 'void' && b.status !== 'pool').forEach(b => {
     const gname = (cfg[b.gid] || {}).name || '';
     const old = daysBetween_(b.date, today) > 14;
     if (b.payer.uid === me.uid) {
@@ -799,7 +810,7 @@ function hkHome_(me, grp) {
   if (grp) {
     const seen = grp.g.seen || {};
     res.group = { name: grp.g.name || '', members: Object.keys(seen).filter(u => u !== me.uid).map(u => ({ uid: u, name: seen[u] })) };
-    res.pools = poolList_(grp.gid).filter(x => x.status === 'open' || daysBetween_(String(x.created).slice(0, 10), today) <= 14).map(x => poolBrief_(x, me));
+    res.pools = poolList_(grp.gid, all).filter(x => poolIn_(x, me.uid) && (x.status === 'open' || daysBetween_(String(x.closed || x.created).slice(0, 10), today) <= 14)).map(x => poolBrief_(x, me, rows));
   }
   return res;
 }
@@ -873,16 +884,23 @@ function hkCreate_(me, grp, p, old) {
   const seen = (grpCfg_()[gid] || {}).seen || {};
   const totalS = Math.round(Number(p.totalS) || 0);
   if (totalS <= 0 || totalS > 100000000) throw new Error('ยอดรวมไม่ถูกต้อง');
-  if (p.pool && !old && grp) {   // 🏦 กองแบบหารเท่ากันทั้งกอง: ทุกบิลหารเท่ากันทุกคนในกองเสมอ (ไม่สนยอดรายคนที่ส่งมา)
-    const pl = poolGet_(p.pool, grp);
-    if (pl.equal) p = Object.assign({}, p, poolEqualSplit_(pl, totalS));
+  if (old && old.poolRole && old.poolRole !== 'spend') throw new Error('บิลของกองกลาง แก้ในหน้ากองกลางแทน');
+  let pool = null;
+  const poolId = old ? (old.poolRole === 'spend' ? old.pool : '') : p.pool;
+  if (poolId) {   // 🏦 จ่ายจากกองกลาง (ใหม่/แก้): เฉพาะคนถือกอง · กองต้องยังเปิด · คนในบิลต้องเป็นคนในกอง
+    pool = poolGet_(poolId, old ? null : grp);
+    if (pool.holder.uid !== me.uid) throw new Error('จ่ายบิลจากกองได้เฉพาะ ' + pool.holder.name + ' (คนถือกอง)');
+    if (pool.status !== 'open') throw new Error('กองนี้ปิดแล้ว');
+    if (pool.equal) p = Object.assign({}, p, poolEqualSplit_(pool, totalS));   // หารเท่ากันทั้งกอง: ไม่สนยอดรายคนที่ส่งมา
+    if ((p.members || []).some(x => !x.uid || !pool.members.some(m => m.uid === String(x.uid)))) throw new Error('บิลจากกองเลือกได้เฉพาะคนในกอง (เพิ่มคนเข้ากองได้ในหน้ากองกลาง)');
   }
   const mode = /^(equal|hours|items|custom)$/.test(p.mode) ? p.mode : 'custom';
   const keys = {};
   const members = (Array.isArray(p.members) ? p.members : []).slice(0, 40).map(x => {
     const uid = String(x.uid || '');
-    if (uid && (uid === me.uid || !seen[uid])) return null;   // เลือกได้เฉพาะคนที่บอทรู้จักในกลุ่ม
-    const name = uid ? seen[uid] : String(x.name || '').trim().replace(/^\+/, '').slice(0, 30);
+    const pm = pool && pool.members.find(m => m.uid === uid);
+    if (uid && (uid === me.uid || !(seen[uid] || pm))) return null;   // เลือกได้เฉพาะคนที่บอทรู้จักในกลุ่ม (คนในกองนับด้วย แม้ชื่อหลุดจากรายชื่อกลุ่ม)
+    const name = uid ? seen[uid] || pm.name : String(x.name || '').trim().replace(/^\+/, '').slice(0, 30);
     if (!name) return null;
     const k = uid || 'o:' + name;
     if (keys[k]) return null;
@@ -909,14 +927,7 @@ function hkCreate_(me, grp, p, old) {
   const newRc = /^[\w-]{20,}$/.test(String(p.rcpt || '')) && CacheService.getScriptCache().get('hkrc:' + p.rcpt) === me.uid ? String(p.rcpt) : '';
   const rcpt = newRc || (old && p.keepRcpt ? old.rcpt || '' : '');
   const cat = Object.prototype.hasOwnProperty.call(HK_CAT_MONEY, String(p.cat || '')) ? String(p.cat) : '';
-  let pool = null;
-  if (p.pool && !old) {   // 🏦 จ่ายจากกองกลาง: เฉพาะคนถือกอง · กองต้องยังเปิด
-    pool = poolGet_(p.pool, grp);
-    if (pool.holder.uid !== me.uid) throw new Error('จ่ายบิลจากกองได้เฉพาะ ' + pool.holder.name + ' (คนถือกอง)');
-    if (pool.status !== 'open') throw new Error('กองนี้ปิดแล้ว');
-  }
   const b = old || { id: Utilities.getUuid().replace(/-/g, ''), gid: gid, token: grpTok_(), v: 2, via: 'app', created: stamp_(), status: 'open' };
-  if (old && old.poolRole) throw new Error('บิลของกองกลาง แก้ในหน้ากองกลางแทน');
   if (old) { try { grpOweVoid_(b); } catch (e) {} }
   Object.assign(b, {
     title: String(p.title || '').trim().slice(0, 60) || 'หารกัน', date: /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? p.date : (old ? old.date : todayStr_()),
@@ -932,38 +943,63 @@ function hkCreate_(me, grp, p, old) {
   try { b.owe = grpOweCreate_(b); } catch (e) { console.warn('grpOwe: ' + e); }
   grpSave_(b);
   if (pool) {
-    const v = poolView_(pool, me);
-    return { pool: v, msg: poolFlex_(pool, b) };
+    return { pool: poolView_(pool, me), msg: poolFlex_(pool, b, old ? 'แก้' : '') };
   }
   return { bill: hkView_(b, me), msg: hkCardFlex_(b, old ? 'แก้บิล' : 'บิลใหม่') };
 }
 
 /* ===================== 🏦 กองกลางในกลุ่ม =====================
- * pool (แถวในแท็บ Group, kind:'pool'): { name, holder{uid,name}, members[{k,uid,name,inS}], holderInS, equal (หารเท่ากันทั้งกอง), status open|closed, contrib (id บิลลงกอง), topup (id บิลเติมกอง), refunds[{k,name,amtS,done}] }
+ * pool (แถวในแท็บ Group, kind:'pool'): { name, holder{uid,name}, members[{k,uid,name}], equal (หารเท่ากันทั้งกอง), status open|closed|void,
+ *   contribs[id บิลลงกอง ทุกรอบ] (กองรุ่นแรกใช้ contrib), topup (id บิลเติมกอง), refunds[{k,name,amtS,done (คนถือกองโอนคืนแล้ว),got (คนได้คืนกดรับแล้ว)}], final (ยอดตอนปิด) }
  * บิลลงกอง/เติมกอง = บิลปกติ (คนถือกองเป็นคนรับเงิน) + noOwe · บิลที่จ่ายจากกอง = status 'pool', poolRole 'spend' (ไม่มีใครต้องโอน)
- * ปิดกอง: คงเหลือของแต่ละคน = ลงกองจริง (แจ้งโอนแล้ว) − ส่วนที่ใช้ → ติดลบ = บิลเติมกอง · บวก = คนถือกองคืนให้ (ติ๊กคืนแล้ว) */
-function poolList_(gid) { return grpRows_(true).filter(x => x.kind === 'pool' && x.gid === gid && x.status !== 'void'); }
+ * นับเงินลงกองเฉพาะแถวที่คนถือกองยืนยันได้รับแล้ว (ok) · ปิดกองไม่ได้ถ้ายังมีคนแจ้งโอนที่ยังไม่ยืนยัน
+ * ปิดกอง: คงเหลือ = ลงกอง − ส่วนที่ใช้ → ติดลบ = บิลเติมกอง · บวก = คนถือกองคืนให้ · เก็บยอดตอนปิดไว้ใน final (บิลหลังปิดแก้/ลบไม่ได้)
+ * ในกลุ่มโชว์แค่ยอดรวม · ยอดของแต่ละคนดูในหน้ากอง (เฉพาะคนในกอง เห็นทุกคนเพื่อความยุติธรรม) */
+function poolNorm_(x) { if (!x.contribs) x.contribs = x.contrib ? [x.contrib] : []; x.members = (x.members || []).map(m => ({ k: m.k || m.uid, uid: m.uid, name: m.name })); return x; }
+function poolList_(gid, rows) { return (rows || grpRows_(true)).filter(x => x.kind === 'pool' && x.gid === gid && x.status !== 'void').map(poolNorm_); }
 function poolGet_(id, grp) {
   const x = grpRows_(true).find(r => r.id === String(id || '') && r.kind === 'pool');
-  if (!x || x.status === 'void') throw new Error('ไม่พบกองกลางนี้');
+  if (!x || x.status === 'void') throw new Error('ไม่พบกองกลางนี้ หรือกองถูกยกเลิกแล้ว');
   if (grp && x.gid !== grp.gid) throw new Error('กองนี้อยู่คนละกลุ่ม');
-  return x;
+  return poolNorm_(x);
 }
-function poolCalc_(pool) {
-  const rows = grpRows_();
-  const contrib = rows.find(b => b.id === pool.contrib), spends = rows.filter(b => b.pool === pool.id && b.poolRole === 'spend' && b.status !== 'void');
+function poolIn_(pool, uid) { return pool.holder.uid === uid || pool.members.some(m => m.uid === uid); }
+function poolCalc_(pool, rows) {
+  rows = rows || grpRows_();
+  const byId = {};
+  rows.forEach(b => { byId[b.id] = b; });
+  const contribs = pool.contribs.map(id => byId[id]).filter(b => b && b.status !== 'void');
+  const spends = rows.filter(b => b.pool === pool.id && b.poolRole === 'spend' && b.status !== 'void');
   const people = {};
-  const P = (k, name) => people[k] = people[k] || { k: k, name: name, planS: 0, inS: 0, useS: 0, st: 'ok' };
-  P(pool.holder.uid, pool.holder.name).planS = P(pool.holder.uid).inS = pool.holderInS || 0;
-  pool.members.forEach(m => { const x = P(m.k, m.name); x.planS = m.inS; const c = contrib && contrib.members.find(r => r.k === m.k); x.st = c ? c.st : 'ok'; x.inS = !c || c.st !== 'wait' ? m.inS : 0; });
+  const P = (k, name) => people[k] = people[k] || { k: k, name: name, planS: 0, inS: 0, toldS: 0, useS: 0 };
+  P(pool.holder.uid, pool.holder.name);
+  pool.members.forEach(m => P(m.k, m.name));
+  if (!contribs.length && pool.holderInS) { const h = P(pool.holder.uid); h.planS = h.inS = pool.holderInS; }   // กองรุ่นแรกที่ไม่มีบิลลงกอง
+  contribs.forEach(b => {
+    const h = P(pool.holder.uid);
+    h.planS += b.payer.shareS || 0; h.inS += b.payer.shareS || 0;
+    b.members.forEach(m => {
+      const x = P(grpResp_(m) || m.k, m.by ? m.by.name : m.name);
+      x.planS += m.amtS;
+      if (m.st === 'ok') x.inS += m.amtS; else if (m.st === 'told') x.toldS += m.amtS;
+    });
+  });
   spends.forEach(b => {
     P(b.payer.uid, b.payer.name).useS += b.payer.shareS || 0;
-    b.members.forEach(m => { const k = grpResp_(m) || m.k; P(k, m.by ? m.by.name : m.name).useS += m.amtS; });
+    b.members.forEach(m => { P(grpResp_(m) || m.k, m.by ? m.by.name : m.name).useS += m.amtS; });
   });
   const list = Object.values(people);
   list.forEach(x => { x.balS = x.inS - x.useS; });
   const inS = list.reduce((s, x) => s + x.inS, 0), spentS = spends.reduce((s, b) => s + b.totalS, 0);
-  return { list: list, bills: spends.map(b => ({ id: b.id, title: b.title, totalS: b.totalS, date: b.date, cat: b.cat || '' })).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0), inS: inS, planS: list.reduce((s, x) => s + x.planS, 0), spentS: spentS, leftS: inS - spentS };
+  return { list: list, contribs: contribs, spends: spends,
+    bills: spends.map(b => ({ id: b.id, title: b.title, totalS: b.totalS, date: b.date, cat: b.cat || '' })).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0),
+    inS: inS, planS: list.reduce((s, x) => s + x.planS, 0), toldS: list.reduce((s, x) => s + x.toldS, 0), spentS: spentS, leftS: inS - spentS };
+}
+/** ยอดที่ใช้โชว์: กองที่ปิดแล้วใช้ยอดตอนปิด (บิลลงกองที่ไม่ได้โอนถูกตัดไปคิดในเติมกองแล้ว) */
+function poolNums_(pool, rows) {
+  const c = poolCalc_(pool, rows);
+  if (pool.status === 'closed' && pool.final) Object.assign(c, pool.final);
+  return c;
 }
 /** หารเท่ากันทุกคนในกอง (คนถือกอง + สมาชิก) · เศษสตางค์อยู่กับคนถือกอง */
 function poolEqualSplit_(pool, totalS) {
@@ -971,22 +1007,20 @@ function poolEqualSplit_(pool, totalS) {
   return { mode: 'equal', payerIn: true, payerShareS: totalS - each * pool.members.length, items: [], payerItems: [], unit: '',
     members: pool.members.map(m => ({ uid: m.uid, amtS: each })) };
 }
-/** การ์ดกองกลาง: แจ้งในกลุ่มทุกครั้งที่จ่ายจากกอง (spent = บิลที่เพิ่งจ่าย) และตอนพิมพ์ กองกลาง */
-function poolFlex_(pool, spent) {
-  const c = poolCalc_(pool), tok = grpEnsureTok_(pool.gid) || '';
+/** การ์ดกองกลางในกลุ่ม: ยอดรวมอย่างเดียว (ยอดของแต่ละคนดูในหน้ากอง) · spent = บิลที่เพิ่งจ่าย · how = 'แก้' */
+function poolFlex_(pool, spent, how, rows) {
+  const c = poolNums_(pool, rows), tok = grpEnsureTok_(pool.gid) || '', closed = pool.status === 'closed';
   const pct = c.inS > 0 ? Math.max(0, Math.min(100, Math.round(c.spentS * 100 / c.inS))) : (c.spentS ? 100 : 0);
   const over = c.leftS < 0, n = c.list.length;
-  const top = c.list.slice().sort((a, b) => a.balS - b.balS).slice(0, 8).map(x => ({ type: 'box', layout: 'horizontal', contents: [
-    { type: 'text', text: x.name, size: 'xs', color: HK_INK, flex: 5 },
-    { type: 'text', text: 'ใช้ ' + grpB_(x.useS), size: 'xs', color: HK_MUTE, align: 'end', flex: 4 },
-    { type: 'text', text: (x.balS < 0 ? 'ขาด ' : x.balS > 0 ? 'เหลือ ' : '') + grpB_(Math.abs(x.balS)), size: 'xs', color: x.balS < 0 ? '#8a4b1f' : '#2f6b3e', align: 'end', flex: 4 }] }));
+  const notIn = c.list.filter(x => x.planS > x.inS).length;
   const head = spent ? [
-      { type: 'text', text: '🏦 จ่ายจากกอง ' + pool.name, size: 'xs', color: '#3a3f39' },
+      { type: 'text', text: '🏦 ' + (how ? how + 'บิลจากกอง ' : 'จ่ายจากกอง ') + pool.name, size: 'xs', color: '#3a3f39', wrap: true },
       { type: 'text', text: cut_(spent.title, 40) + '  ' + grpB_(spent.totalS), weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
-      { type: 'text', text: pool.equal ? 'หารเท่ากัน ' + n + ' คน · คนละ ' + grpB_(Math.floor(spent.totalS / n)) : 'ยอดของแต่ละคนดูในหน้ากองกลาง', size: 'xs', color: HK_MUTE, wrap: true }]
-    : [{ type: 'text', text: '🏦 กองกลาง', size: 'xs', color: '#3a3f39' }, { type: 'text', text: pool.name, weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
-      { type: 'text', text: pool.holder.name + 'ถือกอง' + (pool.equal ? ' · หารเท่ากันทั้งกอง' : ''), size: 'xs', color: HK_MUTE, wrap: true }];
-  return { type: 'flex', altText: (spent ? '🏦 จ่ายจากกอง ' + pool.name + ': ' + cut_(spent.title, 30) + ' ' + grpB_(spent.totalS) + ' · ' : '🏦 กองกลาง ' + pool.name + ': ') + (over ? 'กองขาด ' : 'เหลือ ') + grpB_(Math.abs(c.leftS)),
+      { type: 'text', text: pool.equal ? 'หารเท่ากัน ' + n + ' คน' : 'ยอดของแต่ละคนดูในหน้ากองกลาง', size: 'xs', color: HK_MUTE, wrap: true }]
+    : [{ type: 'text', text: closed ? '🏦 ปิดกองกลางแล้ว' : '🏦 กองกลาง', size: 'xs', color: '#3a3f39' }, { type: 'text', text: pool.name, weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
+      { type: 'text', text: pool.holder.name + 'ถือกอง · ' + n + ' คน' + (pool.equal ? ' · หารเท่ากันทั้งกอง' : ''), size: 'xs', color: HK_MUTE, wrap: true }];
+  const foot = closed ? 'คนที่ใช้เกินได้บิล "เติมกอง" · คนที่เหลือได้เงินคืน' : notIn ? 'ยังไม่โอนลงกอง ' + notIn + ' คน' : '';
+  return { type: 'flex', altText: (spent ? '🏦 ' + (how ? how + 'บิลจากกอง ' : 'จ่ายจากกอง ') + pool.name + ': ' + cut_(spent.title, 30) + ' ' + grpB_(spent.totalS) + ' · ' : '🏦 กองกลาง ' + pool.name + ': ') + (over ? 'กองขาด ' : 'เหลือ ') + grpB_(Math.abs(c.leftS)),
     contents: { type: 'bubble', size: 'kilo',
       body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: head.concat([
         { type: 'separator', margin: 'md' },
@@ -995,69 +1029,114 @@ function poolFlex_(pool, spent) {
           { type: 'text', text: grpB_(Math.abs(c.leftS)), size: 'xl', weight: 'bold', color: over ? '#8a4b1f' : HK_INK, align: 'end', flex: 1 }] },
         { type: 'box', layout: 'vertical', height: '8px', backgroundColor: '#e6e8e3', cornerRadius: '4px', contents: [
           { type: 'box', layout: 'vertical', height: '8px', width: Math.max(pct, 2) + '%', backgroundColor: over ? '#8a4b1f' : HK_INK, cornerRadius: '4px', contents: [{ type: 'filler' }] }] },
-        { type: 'text', text: 'ใช้ไป ' + grpB_(c.spentS) + ' จาก ' + grpB_(c.inS) + ' (' + pct + '%) · ' + c.bills.length + ' บิล', size: 'xxs', color: HK_MUTE, wrap: true },
-        { type: 'separator', margin: 'md' },
-        { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: top }]) },
+        { type: 'text', text: 'ใช้ไป ' + grpB_(c.spentS) + ' จาก ' + grpB_(c.inS) + ' (' + pct + '%) · ' + c.bills.length + ' บิล', size: 'xxs', color: HK_MUTE, wrap: true }]
+        .concat(foot ? [{ type: 'text', text: foot, size: 'xxs', color: HK_MUTE, wrap: true }] : [])) },
       footer: { type: 'box', layout: 'vertical', contents: [
-        { type: 'button', style: 'primary', color: HK_INK, height: 'sm', action: { type: 'uri', label: 'ดูสรุปกองกลาง', uri: hkUrl_(tok, '', 'p=' + pool.id) } }] } } };
+        { type: 'button', style: 'primary', color: HK_INK, height: 'sm', action: { type: 'uri', label: closed ? 'ดูยอดของฉัน (เติม/คืน)' : 'ดูสรุปกองกลาง', uri: hkUrl_(tok, '', 'p=' + pool.id) } }] } } };
 }
-function poolBrief_(pool, me) {
-  const c = poolCalc_(pool), mine = c.list.find(x => x.k === me.uid);
+function poolBrief_(pool, me, rows) {
+  const c = poolNums_(pool, rows), mine = c.list.find(x => x.k === me.uid);
   return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: pool.holder.uid === me.uid, status: pool.status, leftS: c.leftS, myBalS: mine ? mine.balS : 0 };
 }
-function poolView_(pool, me) {
-  const c = poolCalc_(pool), isHolder = pool.holder.uid === me.uid;
-  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, equal: !!pool.equal, contrib: pool.contrib || '', topup: pool.topup || '',
-    inS: c.inS, planS: c.planS, spentS: c.spentS, leftS: c.leftS, bills: c.bills,
-    rows: c.list.map(x => ({ k: x.k, name: x.name, me: x.k === me.uid, holder: x.k === pool.holder.uid, planS: x.planS, inS: x.inS, st: x.st, useS: x.useS, balS: x.balS })),
-    refunds: (pool.refunds || []).map(r => ({ k: r.k, name: r.name, amtS: r.amtS, done: !!r.done, me: r.k === me.uid })),
+function poolView_(pool, me, rows) {
+  if (!poolIn_(pool, me.uid)) throw new Error('คุณไม่ได้อยู่ในกองนี้ ดูได้เฉพาะคนในกอง');
+  rows = rows || grpRows_();
+  const c = poolNums_(pool, rows), isHolder = pool.holder.uid === me.uid, open = pool.status === 'open';
+  const top = pool.topup && rows.find(b => b.id === pool.topup);
+  const topSt = {};
+  if (top) top.members.forEach(m => { topSt[grpResp_(m) || m.k] = m.st; });
+  const ref = {};
+  (pool.refunds || []).forEach(r => { ref[r.k] = r; });
+  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, equal: !!pool.equal, topup: pool.topup || '',
+    inS: c.inS, planS: c.planS, toldS: open ? c.toldS : 0, spentS: c.spentS, leftS: c.leftS, bills: c.bills, rounds: pool.contribs.length,
+    rows: c.list.map(x => ({ k: x.k, name: x.name, me: x.k === me.uid, holder: x.k === pool.holder.uid, planS: x.planS, inS: x.inS, toldS: open ? x.toldS || 0 : 0, useS: x.useS, balS: x.balS,
+      topup: topSt[x.k] || '', refund: ref[x.k] ? (ref[x.k].got ? 'got' : ref[x.k].done ? 'sent' : 'wait') : '' })),
+    refunds: (pool.refunds || []).map(r => ({ k: r.k, name: r.name, amtS: r.amtS, done: !!r.done, got: !!r.got, me: r.k === me.uid })),
     members: pool.members.map(m => ({ uid: m.uid, name: m.name })) };
 }
-function poolNew_(me, grp, p) {
-  if (!grp) throw new Error('สร้างกองกลางได้จากในกลุ่มเท่านั้น');
-  const seen = grp.g.seen || {};
-  const name = String(p.name || '').trim().slice(0, 40);
-  if (!name) throw new Error('ตั้งชื่อกองก่อน เช่น ทริปเขาใหญ่');
-  const keys = {};
-  const members = (Array.isArray(p.members) ? p.members : []).slice(0, 40).map(x => {
+/** บิลลงกอง 1 รอบ (รอบแรกตอนสร้าง · รอบต่อไปจาก เก็บเงินเพิ่ม/เพิ่มคน) */
+function poolRound_(me, pool, myInS, pay, label) {
+  if (!pay.length && !myInS) return null;
+  const b = { id: Utilities.getUuid().replace(/-/g, ''), gid: pool.gid, token: grpTok_(), v: 2, via: 'app', created: stamp_(), status: pay.length ? 'open' : 'done', title: label + ' ' + pool.name, date: todayStr_(),
+    totalS: myInS + grpSum_(pay), mode: 'custom', unit: '', items: [], payerIn: true, cat: 'trip', rcpt: '', noOwe: true, pool: pool.id, poolRole: 'in',
+    payer: { uid: me.uid, name: me.disp, shareS: myInS, units: 0, items: [] },
+    members: pay.map(m => ({ k: m.k, uid: m.uid, name: m.name, out: false, by: null, amtS: m.amtS, units: 0, items: [], st: 'wait', at: '', slip: '' })), edited: '' };
+  grpSave_(b);
+  pool.contribs.push(b.id);
+  return pay.length ? hkCardFlex_(b, label === 'ลงกอง' ? 'ลงกองกลาง' : 'ลงกองกลางเพิ่ม') : null;
+}
+function poolPicks_(grp, me, list, pool) {
+  const seen = grp.g.seen || {}, keys = {};
+  return (Array.isArray(list) ? list : []).slice(0, 40).map(x => {
     const uid = String(x.uid || '');
-    if (!uid || uid === me.uid || !seen[uid] || keys[uid]) return null;
+    const known = pool && pool.members.find(m => m.uid === uid);
+    if (!uid || uid === me.uid || (!seen[uid] && !known) || keys[uid]) return null;
     keys[uid] = 1;
     const inS = Math.round(Number(x.inS) || 0);
     if (inS < 0 || inS > 100000000) throw new Error('ยอดลงกองไม่ถูกต้อง');
-    return { k: uid, uid: uid, name: seen[uid], inS: inS };
+    return { k: uid, uid: uid, name: seen[uid] || known.name, amtS: inS };
   }).filter(Boolean);
+}
+function poolNew_(me, grp, p) {
+  if (!grp) throw new Error('สร้างกองกลางได้จากในกลุ่มเท่านั้น');
+  const name = String(p.name || '').trim().slice(0, 40);
+  if (!name) throw new Error('ตั้งชื่อกองก่อน เช่น ทริปเขาใหญ่');
+  const members = poolPicks_(grp, me, p.members);
   if (!members.length) throw new Error('เลือกคนที่ลงกองอย่างน้อย 1 คน');
-  const pool = { id: Utilities.getUuid().replace(/-/g, ''), gid: grp.gid, token: grpTok_(), kind: 'pool', v: 1, name: name, created: stamp_(), status: 'open',
-    holder: { uid: me.uid, name: me.disp }, holderInS: Math.max(0, Math.round(Number(p.myInS) || 0)), members: members, equal: !!p.equal, refunds: [] };
-  let msg = null;
-  const pay = members.filter(m => m.inS > 0);
-  if (pay.length) {
-    const b = { id: Utilities.getUuid().replace(/-/g, ''), gid: grp.gid, token: grpTok_(), v: 2, via: 'app', created: stamp_(), status: 'open', title: 'ลงกอง ' + name, date: todayStr_(),
-      totalS: pool.holderInS + grpSum_(pay.map(m => ({ amtS: m.inS }))), mode: 'custom', unit: '', items: [], payerIn: true, cat: 'trip', rcpt: '', noOwe: true, pool: pool.id, poolRole: 'in',
-      payer: { uid: me.uid, name: me.disp, shareS: pool.holderInS, units: 0, items: [] },
-      members: pay.map(m => ({ k: m.k, uid: m.uid, name: m.name, out: false, by: null, amtS: m.inS, units: 0, items: [], st: 'wait', at: '', slip: '' })), edited: '' };
-    grpSave_(b);
-    pool.contrib = b.id;
-    msg = hkCardFlex_(b, 'ลงกองกลาง');
-  }
+  const pool = { id: Utilities.getUuid().replace(/-/g, ''), gid: grp.gid, token: grpTok_(), kind: 'pool', v: 2, name: name, created: stamp_(), status: 'open',
+    holder: { uid: me.uid, name: me.disp }, members: members.map(m => ({ k: m.k, uid: m.uid, name: m.name })), equal: !!p.equal, contribs: [], refunds: [] };
+  const msg = poolRound_(me, pool, Math.max(0, Math.round(Number(p.myInS) || 0)), members.filter(m => m.amtS > 0), 'ลงกอง');
   grpSave_(pool);
   return { pool: poolView_(pool, me), msg: msg };
+}
+/** ➕ เพิ่มคนกลางทาง / เก็บเงินลงกองรอบใหม่ (คนเดิมหรือคนใหม่) */
+function poolAdd_(me, grp, pool, p) {
+  if (!grp) throw new Error('เปิดหน้านี้จากในกลุ่มก่อน');
+  if (pool.holder.uid !== me.uid) throw new Error('เพิ่มคนหรือเก็บเงินเพิ่มได้เฉพาะ ' + pool.holder.name + ' (คนถือกอง)');
+  if (pool.status !== 'open') throw new Error('กองนี้ปิดแล้ว');
+  const picks = poolPicks_(grp, me, p.members, pool), myInS = Math.max(0, Math.round(Number(p.myInS) || 0));
+  const fresh = picks.filter(m => !pool.members.some(x => x.uid === m.uid));
+  if (!fresh.length && !picks.some(m => m.amtS > 0) && !myInS) throw new Error('เลือกคนใหม่ หรือใส่ยอดที่จะเก็บเพิ่มก่อน');
+  fresh.forEach(m => pool.members.push({ k: m.k, uid: m.uid, name: m.name }));
+  const msg = poolRound_(me, pool, myInS, picks.filter(m => m.amtS > 0), 'ลงกองเพิ่ม');
+  grpSave_(pool);
+  const txt = fresh.length ? grpText_('🏦 เพิ่ม ' + fresh.map(m => m.name).join(', ') + ' เข้ากองกลาง "' + pool.name + '" แล้ว' + (pool.equal ? '\nบิลต่อจากนี้หารเท่ากัน ' + (pool.members.length + 1) + ' คน' : '')) : null;
+  return { pool: poolView_(pool, me), msg: [txt, msg].filter(Boolean) };
+}
+/** คนถือกองยืนยันได้รับเงินลงกองของคนนั้น (ทุกรอบที่แจ้งโอนแล้ว) */
+function poolOk_(me, pool, p) {
+  if (pool.holder.uid !== me.uid) throw new Error('ยืนยันได้เฉพาะคนถือกอง');
+  if (pool.status !== 'open') throw new Error('กองนี้ปิดแล้ว');
+  const k = String(p.k || ''), rows = grpRows_();
+  let n = 0;
+  pool.contribs.forEach(id => {
+    const b = rows.find(x => x.id === id);
+    if (!b || b.status === 'void') return;
+    const list = b.members.filter(m => (grpResp_(m) || m.k) === k && m.st !== 'ok' && (p.all || m.st === 'told'));
+    if (list.length) { grpSetSt_(b, list, 'ok'); n += list.length; }
+  });
+  if (!n) throw new Error('ไม่มียอดที่รอยืนยัน');
+  return { pool: poolView_(pool, me) };
 }
 function poolClose_(me, pool) {
   if (pool.holder.uid !== me.uid) throw new Error('ปิดกองได้เฉพาะ ' + pool.holder.name + ' (คนถือกอง)');
   if (pool.status !== 'open') throw new Error('กองนี้ปิดไปแล้ว');
+  const c0 = poolCalc_(pool);
+  const told = c0.list.filter(x => x.toldS > 0);
+  if (told.length) throw new Error('ยังมีคนแจ้งโอนลงกองที่ยังไม่ได้ยืนยัน: ' + told.map(x => x.name).join(', ') + '\nกด "ได้รับแล้ว" ในหน้ากองก่อนปิด');
+  // คนที่ยังไม่โอนลงกอง: ย้ายแถวไปเก็บใน dropped แล้วไปคิดในยอดเติมกองแทน (ไม่ทวงซ้ำ)
+  c0.contribs.forEach(b => {
+    const wait = b.members.filter(m => m.st === 'wait');
+    if (!wait.length && b.status !== 'open') return;
+    b.dropped = (b.dropped || []).concat(wait);
+    b.members = b.members.filter(m => m.st !== 'wait');
+    b.totalS = (b.payer.shareS || 0) + grpSum_(b.members);
+    b.status = 'done';
+    grpSave_(b);
+  });
   const c = poolCalc_(pool);
-  // คนที่ยังไม่แจ้งโอนลงกอง: ยกเลิกแถวลงกอง แล้วไปคิดในยอดเติมกองแทน (ไม่ทวงซ้ำ)
-  const contrib = pool.contrib && grpBill_(pool.contrib);
-  if (contrib && contrib.status === 'open') {
-    contrib.members = contrib.members.filter(m => m.st !== 'wait');
-    contrib.totalS = (contrib.payer.shareS || 0) + grpSum_(contrib.members);
-    contrib.status = 'done';
-    grpSave_(contrib);
-  }
   const owe = c.list.filter(x => x.k !== pool.holder.uid && x.balS < 0), back = c.list.filter(x => x.k !== pool.holder.uid && x.balS > 0);
-  let msg = null;
+  let topCard = null;
   if (owe.length) {
     const b = { id: Utilities.getUuid().replace(/-/g, ''), gid: pool.gid, token: grpTok_(), v: 2, via: 'app', created: stamp_(), status: 'open', title: 'เติมกอง ' + pool.name, date: todayStr_(),
       totalS: grpSum_(owe.map(x => ({ amtS: -x.balS }))), mode: 'custom', unit: '', items: [], payerIn: false, cat: 'trip', rcpt: '', noOwe: true, pool: pool.id, poolRole: 'topup',
@@ -1065,25 +1144,50 @@ function poolClose_(me, pool) {
       members: owe.map(x => { const m = pool.members.find(y => y.k === x.k); return { k: x.k, uid: m ? m.uid : '', name: x.name, out: !m, by: null, amtS: -x.balS, units: 0, items: [], st: 'wait', at: '', slip: '' }; }), edited: '' };
     grpSave_(b);
     pool.topup = b.id;
-    msg = hkCardFlex_(b, 'เติมกองกลาง');
+    topCard = hkCardFlex_(b, 'เติมกองกลาง');
   }
-  pool.refunds = back.map(x => ({ k: x.k, name: x.name, amtS: x.balS, done: false }));
+  pool.refunds = back.map(x => ({ k: x.k, name: x.name, amtS: x.balS, done: false, got: false }));
+  pool.final = { list: c.list, inS: c.inS, planS: c.planS, toldS: 0, spentS: c.spentS, leftS: c.leftS };
   pool.status = 'closed';
   pool.closed = stamp_();
   grpSave_(pool);
-  const lines = ['🏦 ปิดกองกลาง "' + pool.name + '" · ลงกอง ' + grpB_(c.inS) + ' · ใช้ไป ' + grpB_(c.spentS) + ' · ' + (c.leftS >= 0 ? 'เหลือ ' : 'ขาด ') + grpB_(Math.abs(c.leftS))]
-    .concat(pool.refunds.map(r => '• ' + pool.holder.name + ' คืน ' + r.name + ' ' + grpB_(r.amtS)))
-    .concat(owe.map(x => '• ' + x.name + ' เติมกอง ' + grpB_(-x.balS) + ' (ดูการ์ดบิลเติมกอง)'));
-  return { pool: poolView_(pool, me), msg: [grpText_(lines.join('\n'))].concat(msg ? [msg] : []) };
+  return { pool: poolView_(pool, me), msg: [poolFlex_(pool)].concat(topCard ? [topCard] : []) };
 }
+/** คืนเงิน: คนถือกองกด "โอนคืนแล้ว" (done) · คนที่ได้คืนกด "ได้รับคืนแล้ว" (got) */
 function poolRefund_(me, pool, p) {
-  if (pool.holder.uid !== me.uid) throw new Error('ติ๊กคืนเงินได้เฉพาะคนถือกอง');
   const r = (pool.refunds || []).find(x => x.k === String(p.k || ''));
   if (!r) throw new Error('ไม่พบรายการคืนเงินนี้');
-  r.done = !p.undo;
-  r.at = r.done ? stamp_() : '';
+  if (r.k === me.uid) { r.got = !p.undo; if (r.got) r.done = true; r.gotAt = r.got ? stamp_() : ''; }
+  else if (pool.holder.uid === me.uid) { if (r.got && p.undo) throw new Error(r.name + ' กดได้รับคืนแล้ว'); r.done = !p.undo; r.at = r.done ? stamp_() : ''; }
+  else throw new Error('ติ๊กได้เฉพาะคนถือกองหรือคนที่ได้คืน');
   grpSave_(pool);
   return { pool: poolView_(pool, me) };
+}
+/** 🗑 ยกเลิกทั้งกอง: ได้เมื่อยังไม่มีบิลจ่ายจากกอง (มีแล้ว = ลบบิลก่อน หรือปิดกองแทน) */
+function poolCancel_(me, pool) {
+  if (pool.holder.uid !== me.uid) throw new Error('ยกเลิกกองได้เฉพาะ ' + pool.holder.name + ' (คนถือกอง)');
+  if (pool.status !== 'open') throw new Error('กองนี้ปิดแล้ว ยกเลิกไม่ได้');
+  const c = poolCalc_(pool);
+  if (c.spends.length) throw new Error('กองนี้มีบิลที่จ่ายจากกองแล้ว ' + c.spends.length + ' บิล ลบบิลเหล่านั้นก่อน หรือกดปิดกองแทน');
+  const paid = c.list.filter(x => x.k !== pool.holder.uid && (x.inS > 0 || x.toldS > 0));
+  c.contribs.forEach(b => { b.status = 'void'; grpSave_(b); });
+  pool.status = 'void';
+  pool.closed = stamp_();
+  grpSave_(pool);
+  return { done: true, msg: grpText_('🗑 ยกเลิกกองกลาง "' + pool.name + '" แล้ว' + (paid.length ? '\n' + pool.holder.name + ' คืนเงินที่โอนลงกองให้ ' + paid.map(x => x.name).join(', ') + ' นะครับ' : '')) };
+}
+/** ส่งการ์ดสรุปเข้ากลุ่มอีกครั้ง (กรณีส่งไม่ออก) */
+function poolCard_(me, pool) {
+  if (!poolIn_(pool, me.uid)) throw new Error('คุณไม่ได้อยู่ในกองนี้');
+  const top = pool.topup && grpBill_(pool.topup);
+  return { msg: [poolFlex_(pool)].concat(top && top.status === 'open' ? [hkCardFlex_(top, 'เติมกองกลาง')] : []) };
+}
+/** บิลของกองกลาง: ลบ/แก้ได้เฉพาะบิลจ่ายจากกองตอนกองยังเปิด · บิลลงกอง/เติมกองไปจัดการในหน้ากอง */
+function poolBillGuard_(b, what) {
+  if (!b.poolRole) return;
+  if (b.poolRole !== 'spend') throw new Error('บิล' + (b.poolRole === 'in' ? 'ลงกอง' : 'เติมกอง') + 'เป็นของกองกลาง ' + what + 'ไม่ได้ (ยกเลิกทั้งกองได้ในหน้ากองกลาง)');
+  const pool = poolGet_(b.pool);
+  if (pool.status !== 'open') throw new Error('ปิดกองแล้ว ' + what + 'บิลจากกองไม่ได้');
 }
 
 /** ⏱ บิลตามชั่วโมงที่เปิดให้แต่ละคนแก้ชั่วโมงของตัวเอง: ได้จนกว่าจะมีคนแจ้งจ่าย (แถวที่คนจ่ายก่อนจ่ายแทนไม่นับ) */
@@ -1137,6 +1241,7 @@ function hkPaid_(me, b, p) {
 /** คนจ่ายก่อนกด "ได้เงินแล้ว" (k = แถว หรือ r:<uid> = ทุกแถวที่คนนั้นต้องจ่าย) */
 function hkOk_(me, b, p) {
   if (b.payer.uid !== me.uid) throw new Error('ยืนยันได้เฉพาะคนจ่ายก่อน');
+  if (b.poolRole === 'in' && poolGet_(b.pool).status !== 'open') throw new Error('ปิดกองแล้ว แก้ยอดลงกองไม่ได้');
   const k = String(p.k || '');
   const list = b.members.filter(m => m.k === k || ('r:' + grpResp_(m)) === k);
   if (!list.length) throw new Error('ไม่พบแถวนี้');
