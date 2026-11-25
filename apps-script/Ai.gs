@@ -52,6 +52,8 @@ function aiRead_(file, ctx) {
     '- ใบเสร็จร้านสะดวกซื้อ/ห้าง (เช่น 7-Eleven, Lotus, Big C, Tops) มักพิมพ์ "ยอดรวม" ก่อน แล้วตามด้วยบรรทัดส่วนลด/โปร/คูปอง (ติดลบ) แล้วจึง "ยอดสุทธิ/รับเงิน/เงินสด" · amount ต้องเป็นยอดหลังหักส่วนลดทุกบรรทัดเสมอ ไม่ใช่ "ยอดรวม" ก่อนลด',
     '- บรรทัดส่วนลดที่ระบุชื่อสินค้า (เช่น "ส่วนลดน้ำแร่", "7ลดไอศกรีม", "AMBลด…", "คูปองชีสไบท์") ให้ใส่เป็น items[].discount ของสินค้าชื่อนั้น ห้ามใส่เป็นสินค้าแยกหรือราคาติดลบ · ส่วนลดที่ไม่ระบุสินค้า (คูปองท้ายบิล แต้ม The1/สมาชิก Meal Deal ส่วนลดค่าส่ง) = discount ระดับบิล',
     '- ซื้อ 1 แถม 1 / ซื้อคู่ถูกกว่า: ใส่สินค้าตามจำนวนจริงและราคาเต็ม แล้วใส่ส่วนที่ลดเป็น items[].discount ของสินค้านั้น',
+    '- discounts: ทุกบรรทัดส่วนลด/โปร/คูปองในใบเสร็จ บรรทัดละ 1 รายการ · name = ชื่อส่วนลดตามที่พิมพ์ทุกตัวอักษร (ไม่มีชื่อให้ "ส่วนลด") · amount = ยอดลดเป็นบวก · item = ชื่อสินค้าใน items ที่ส่วนลดนี้ลดให้ (คัดลอกชื่อให้ตรงกับ items[].name ทุกตัวอักษร)',
+    '- หา item ของส่วนลดให้ได้ทุกครั้งที่ทำได้: บรรทัดส่วนลดที่อยู่ใต้สินค้า · ชื่อส่วนลดมีชื่อ/รหัส/ยี่ห้อสินค้า · โปรซื้อหลายชิ้นลด (เช่น 3 ห่อ 89) ให้ลดสินค้านั้น · ยอดลดเท่ากับส่วนต่างราคาโปรของสินค้าใด · เว้น item ว่างเฉพาะส่วนลดที่ใช้กับทั้งบิลจริงๆ (คูปองท้ายบิล ส่วนลดสมาชิก/แต้ม % ทั้งบิล ส่วนลดค่าส่ง)',
     '- บรรทัดราคา 0.00 (ของแถม แสตมป์ แต้มสะสม กิจกรรม ข้อความโปร) และบรรทัดยอดรวม/เงินที่รับ/เงินทอน/VAT ไม่ต้องใส่ใน items',
     '- แอปส่งอาหาร (Grab, LINE MAN, foodpanda, Robinhood, ShopeeFood): items = เมนู · ค่าส่ง+ค่าบริการแพลตฟอร์ม+ค่ากล่อง รวมกันเป็น service_charge · โปร/ส่วนลดค่าส่ง/โค้ด = discount',
     '- ร้านอาหารที่บวก service charge 10% และ/หรือ VAT 7% ท้ายบิล: ราคาเมนูยังไม่รวม → prices_include_vat=false และใส่ vat_amount, service_charge ตามที่พิมพ์',
@@ -70,6 +72,7 @@ function aiRead_(file, ctx) {
       date: S('STRING'), time: S('STRING'), amount: S('NUMBER'), vendor: S('STRING'), desc: S('STRING'),
       vat: S('STRING', { enum: ['yes', 'no', 'unknown'] }), vat_amount: S('NUMBER'), prices_include_vat: S('BOOLEAN'),
       service_charge: S('NUMBER'), discount: S('NUMBER'),
+      discounts: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), amount: S('NUMBER'), item: S('STRING') }, required: ['name', 'amount'] }) }),
       items: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), qty: S('NUMBER'), price: S('NUMBER'), discount: S('NUMBER'), discount_note: S('STRING') }, required: ['name', 'price'] }) }),
       pay: S('STRING'), memo: S('STRING'), payer: S('STRING'), payee: S('STRING'), bank: S('STRING'), ref: S('STRING'), tax_id: S('STRING'),
       cat: S('STRING'), confidence: S('NUMBER'),
@@ -83,9 +86,17 @@ function aiRead_(file, ctx) {
   };
   const models = ctx.models || aiModels_();
   const start = Date.now();
-  const r1 = aiCall_(models, body, key, start, ctx);
-  if (!r1) { if (!ctx.models && !ctx.noHealth) aiHealthDone_(false); return null; }
-  let o = aiNormalize_(r1.j, cats, r1.model);
+  // ใบเสร็จหาร: อ่านพร้อมกัน 3 รอบ (ไม่ช้าลง) แล้วเลือกรอบที่ตรงยอด + เจอส่วนลดครบที่สุด (AI มักตกบรรทัดส่วนลดใต้ยอดรวม)
+  let r1 = null, o = null;
+  if (ctx.multi) {
+    const best = aiMulti_(models[0], body, key, cats, ctx);
+    if (best) { r1 = { model: best.model }; o = best; }
+  }
+  if (!r1) {
+    r1 = aiCall_(models, body, key, start, ctx);
+    if (!r1) { if (!ctx.models && !ctx.noHealth) aiHealthDone_(false); return null; }
+    o = aiNormalize_(r1.j, cats, r1.model);
+  }
   // ✅ ตรวจตัวเอง: รายการรวมแล้วไม่เท่ายอดจ่าย → ให้ AI อ่านใบเดิมซ้ำอีกรอบ พร้อมบอกว่าต่างกันเท่าไหร่
   if (o.check && !o.check.ok && !ctx.noRetry && Date.now() - start < 35000) {
     const fix = JSON.parse(JSON.stringify(body));
@@ -100,6 +111,36 @@ function aiRead_(file, ctx) {
   }
   if (!ctx.models && !ctx.noHealth) aiHealthDone_(true);
   return o;
+}
+
+/** อ่านใบเดียวกันพร้อมกันหลายรอบด้วยรุ่นเดียว → ผลที่ดีที่สุด (ตรงยอดก่อน แล้วเลือกที่เจอส่วนลดมากสุด) หรือ null */
+function aiMulti_(model, body, key, cats, ctx) {
+  const n = Math.max(2, Math.min(4, Number(ctx.multi) || 3));
+  const think = ctx.think === undefined ? 'low' : ctx.think;
+  const req = JSON.parse(JSON.stringify(body));
+  if (think && /^gemini-[3-9]/.test(model)) req.generationConfig.thinkingConfig = { thinkingLevel: think };
+  const one = { url: 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(req), headers: { 'x-goog-api-key': key }, muteHttpExceptions: true };
+  let rs;
+  try { rs = UrlFetchApp.fetchAll(Array.from({ length: n }, () => one)); } catch (e) { AI_ERRS.push(model + ' multi: ' + e); return null; }
+  const outs = [];
+  rs.forEach(r => {
+    const code = r.getResponseCode();
+    aiHealthModel_(model, code, code === 200 ? '' : r.getContentText());
+    if (code !== 200) { AI_ERRS.push(model + ' ' + code + ': ' + r.getContentText().slice(0, 200)); return; }
+    try {
+      const res = JSON.parse(r.getContentText());
+      const raw = ((((res.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.thought ? '' : (p.text || '')).join('');
+      outs.push(aiNormalize_(JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim()), cats, model));
+    } catch (e) { AI_ERRS.push(model + ' parse: ' + e); }
+  });
+  if (!outs.length) return null;
+  const disc = o => (o.items || []).reduce((s, it) => s + (it.disc || 0), 0) + (Number(o.discount) || 0);
+  const okd = o => !o.check || o.check.ok ? 1 : 0;
+  outs.sort((a, b) => okd(b) - okd(a) || disc(b) - disc(a) || (b.items || []).length - (a.items || []).length);
+  const best = outs[0];
+  best.reads = outs.length;
+  return best;
 }
 
 /** เรียก Gemini ตามลำดับรุ่น (ลองซ้ำเมื่อคนใช้เยอะ) → { j, model } หรือ null */
@@ -206,31 +247,61 @@ function aiNormalize_(j, cats, model) {
   // บรรทัดส่วนลด/ราคาติดลบที่ AI แยกมาเป็นสินค้า → ย้ายไปเป็นส่วนลดของสินค้าชื่อเดียวกัน (ไม่เจอ = ส่วนลดท้ายบิล)
   const raw = Array.isArray(j.items) ? j.items : [];
   const num = v => { const x = Number(String(v == null ? '' : v).replace(/[,฿\s]/g, '')); return isFinite(x) ? x : 0; };
+  const r2 = x => Math.round(x * 100) / 100;
   const isDiscLine = it => num(it.price) < 0 || (AI_DISC_RE.test(String(it.name || '')) && !n(it.discount));
-  const items = raw.filter(it => !isDiscLine(it)).map(it => {
-    const price = n(it.price), disc = Math.min(n(it.discount), price);
-    return { name: String(it.name || '').trim().slice(0, 60), qty: n(it.qty) || 1, price: price, disc: disc, discNote: String(it.discount_note || '').trim().slice(0, 40) };
-  }).filter(it => it.name && it.price).slice(0, 60);
-  let extraDisc = 0;
-  raw.filter(isDiscLine).forEach(it => {
-    const amt = Math.round(Math.abs(num(it.price)) * 100) / 100, name = String(it.name || '').trim().slice(0, 40);
-    if (!amt) return;
-    const t = aiDiscTarget_(name, items);
-    if (t && Math.abs(t.disc - amt) < 0.01) return;               // AI ใส่ส่วนลดนี้ไว้ที่สินค้าแล้ว ไม่นับซ้ำ
-    if (t && t.disc + amt <= t.price) { t.disc = Math.round((t.disc + amt) * 100) / 100; t.discNote = t.discNote ? t.discNote + ', ' + name : name; }
-    else extraDisc += amt;
-  });
-  // AI ใส่ส่วนลดซ้ำทั้งที่สินค้าและท้ายบิล → ตัดของท้ายบิลออก
-  const itemDisc = items.reduce((s, it) => s + it.disc, 0);
-  let billDisc = n(j.discount);
-  if (extraDisc && billDisc && Math.abs(billDisc - extraDisc) < 0.5) billDisc = 0;
-  if (itemDisc && billDisc && Math.abs(billDisc - itemDisc) < 0.5) billDisc = 0;
-  billDisc = Math.round((billDisc + extraDisc) * 100) / 100;
-  // ✅ ตรวจตัวเลข: (ราคา − ส่วนลด) ของทุกรายการ − ส่วนลดท้ายบิล + ค่าบริการ (+ VAT ถ้าราคายังไม่รวม) ต้องเท่ายอดจ่าย
+  const baseItems = () => raw.filter(it => !isDiscLine(it)).map(it => ({ name: String(it.name || '').trim().slice(0, 60), qty: n(it.qty) || 1, price: n(it.price), disc: 0, discs: [] }))
+    .filter(it => it.name && it.price).slice(0, 60);
+  const addDisc = (t, name, a) => { t.disc = r2(t.disc + a); t.discs.push({ n: name, a: a }); };
+  // แบบที่ 1: ส่วนลดเป็นรายการ (ชื่อ ยอด ลดให้สินค้าไหน) — ใช้เป็นหลักเมื่อ AI ส่งมา
+  const fromList = () => {
+    const its = baseItems(), bill = [];
+    (Array.isArray(j.discounts) ? j.discounts : []).forEach(d => {
+      const a = r2(Math.abs(num(d.amount))), name = String(d.name || 'ส่วนลด').trim().slice(0, 40) || 'ส่วนลด';
+      if (!a) return;
+      const key = String(d.item || '').trim();
+      const t = (key && (its.find(x => x.name === key) || aiDiscTarget_(key, its))) || aiDiscTarget_(name, its);
+      if (t && t.disc + a <= t.price + 0.001) addDisc(t, name, a); else bill.push({ n: name, a: a });
+    });
+    return { items: its, bill: bill };
+  };
+  // แบบที่ 2 (เดิม): items[].discount + บรรทัดส่วนลดที่แยกมา + discount ท้ายบิล
+  const fromItems = () => {
+    const its = baseItems(), bill = [];
+    raw.filter(it => !isDiscLine(it)).forEach(it => {
+      const t = its.find(x => x.name === String(it.name || '').trim().slice(0, 60) && !x.discs.length);
+      const a = t ? Math.min(n(it.discount), t.price) : 0;
+      if (a) addDisc(t, String(it.discount_note || '').trim().slice(0, 40) || 'ส่วนลด', r2(a));
+    });
+    let extra = 0;
+    raw.filter(isDiscLine).forEach(it => {
+      const a = r2(Math.abs(num(it.price))), name = String(it.name || '').trim().slice(0, 40);
+      if (!a) return;
+      const t = aiDiscTarget_(name, its);
+      if (t && Math.abs(t.disc - a) < 0.01) return;               // AI ใส่ส่วนลดนี้ไว้ที่สินค้าแล้ว ไม่นับซ้ำ
+      if (t && t.disc + a <= t.price) addDisc(t, name, a);
+      else { bill.push({ n: name || 'ส่วนลด', a: a }); extra += a; }
+    });
+    // AI ใส่ส่วนลดซ้ำทั้งที่สินค้าและท้ายบิล → ตัดของท้ายบิลออก
+    const itemDisc = its.reduce((s, it) => s + it.disc, 0);
+    let bd = n(j.discount);
+    if (extra && bd && Math.abs(bd - extra) < 0.5) bd = 0;
+    if (itemDisc && bd && Math.abs(bd - itemDisc) < 0.5) bd = 0;
+    if (bd) bill.push({ n: 'ส่วนลดท้ายบิล', a: r2(bd) });
+    return { items: its, bill: bill };
+  };
   const service = n(j.service_charge), incVat = j.prices_include_vat !== false;
   const vatAdd = incVat ? 0 : n(j.vat_amount);   // ใช้เฉพาะยอด VAT ที่พิมพ์จริง ไม่ใช้ค่าประมาณ
+  const netOf = o => r2(o.items.reduce((s, it) => s + it.price - it.disc, 0) - o.bill.reduce((s, d) => s + d.a, 0) + service + vatAdd);
+  const B = fromItems(), L = Array.isArray(j.discounts) && j.discounts.length ? fromList() : null;
+  // เลือกแบบที่รวมแล้วตรงยอดจ่าย (เท่ากัน = แบบรายการ เพราะรู้ว่าส่วนลดไหนลดเมนูไหน)
+  const pickL = L && (!amount || Math.abs(netOf(L) - amount) <= Math.abs(netOf(B) - amount) + 0.01);
+  const D = pickL ? L : B;
+  const items = D.items.map(it => ({ name: it.name, qty: it.qty, price: it.price, disc: it.disc, discs: it.discs, discNote: it.discs.map(d => d.n).join(', ').slice(0, 60) }));
+  const discList = D.bill;
+  const itemDisc = items.reduce((s, it) => s + it.disc, 0);
+  const billDisc = r2(discList.reduce((s, d) => s + d.a, 0));
+  // ✅ ตรวจตัวเลข: (ราคา − ส่วนลด) ของทุกรายการ − ส่วนลดท้ายบิล + ค่าบริการ (+ VAT ถ้าราคายังไม่รวม) ต้องเท่ายอดจ่าย
   const gross = items.reduce((s, it) => s + it.price, 0);
-  const r2 = x => Math.round(x * 100) / 100;
   let amt = amount, check = null, fixed = '';
   if (items.length && kind !== 'slip') {
     const expect = r2(gross - itemDisc - billDisc + service + vatAdd);
@@ -246,7 +317,7 @@ function aiNormalize_(j, cats, model) {
     via: 'ai', model: model, kind: kind, docType: docType, date: date, time: String(j.time || '').slice(0, 5),
     amount: amt ? String(amt) : '', vendor: String(j.vendor || '').trim().slice(0, 80), desc: String(j.desc || '').trim().slice(0, 60),
     vat: vat, vatAmt: vatAmt ? String(vatAmt) : '', pricesIncVat: incVat,
-    service: service, discount: billDisc, items: items, check: check,
+    service: service, discount: billDisc, discList: discList, items: items, check: check,
     memo: String(j.memo || '').trim().slice(0, 120), pay: String(j.pay || ''), payer: String(j.payer || '').slice(0, 80), payee: String(j.payee || '').slice(0, 80), bank: String(j.bank || '').slice(0, 40), ref: String(j.ref || '').slice(0, 40),
     taxId: String(j.tax_id || '').replace(/\D/g, '').slice(0, 13), cat: cat, confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)),
   };
@@ -277,7 +348,7 @@ function aiReadUpload_(p) {
   if (bytes.length > 15 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 15MB');
   const date = todayStr_();
   const file = moneyFolder_(date.slice(0, 7)).createFile(Utilities.newBlob(bytes, mime, date + '_ใบเสร็จหาร' + (mime === 'application/pdf' ? '.pdf' : '.jpg')));
-  const ocr = readDoc_(file, { cats: [] });
+  const ocr = readDoc_(file, { cats: [], multi: 3 });
   return { ocr: ocr, file: { id: file.getId(), url: file.getUrl(), mime: mime, thumb: String(p.thumb || '').slice(0, 12000) }, ai: !!props.getProperty('GEMINI_API_KEY') };
 }
 
@@ -322,7 +393,7 @@ function aiRegress_(p) {
     try {
       AI_ERRS = [];
       const t1 = Date.now();
-      const o = aiRead_(DriveApp.getFileById(x.id), { cats: [], noHealth: true });
+      const o = aiRead_(DriveApp.getFileById(x.id), { cats: [], noHealth: true, multi: 3 });
       out.ms = Date.now() - t1;
       if (!o) { out.ok = false; out.err = (AI_ERRS[0] || 'AI ไม่ตอบ').slice(0, 120); }
       else {
