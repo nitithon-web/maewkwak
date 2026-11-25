@@ -258,7 +258,7 @@ function aiNormalize_(j, cats, model) {
   const raw = Array.isArray(j.items) ? j.items : [];
   const num = v => { const x = Number(String(v == null ? '' : v).replace(/[,฿\s]/g, '')); return isFinite(x) ? x : 0; };
   const r2 = x => Math.round(x * 100) / 100;
-  const isDiscLine = it => num(it.price) < 0 || (AI_DISC_RE.test(String(it.name || '')) && !n(it.discount));
+  const isDiscLine = it => num(it.price) < 0 || (AI_DISC_RE.test(String(it.name || '')) && !n(it.discount)) || /เหรียญ\s*all|all\s*member|ออลเมม|แสตมป์|สแตมป์|stamp/i.test(String(it.name || ''));
   const baseItems = () => raw.filter(it => !isDiscLine(it)).map(it => ({ name: String(it.name || '').trim().slice(0, 60), qty: n(it.qty) || 1, price: n(it.price), disc: 0, discs: [] }))
     .filter(it => it.name && it.price).slice(0, 60);
   const addDisc = (t, name, a) => { t.disc = r2(t.disc + a); t.discs.push({ n: name, a: a }); };
@@ -268,7 +268,7 @@ function aiNormalize_(j, cats, model) {
     (Array.isArray(j.discounts) ? j.discounts : []).forEach(d => {
       const a = r2(Math.abs(num(d.amount))), name = String(d.name || 'ส่วนลด').trim().slice(0, 40) || 'ส่วนลด';
       if (!a) return;
-      if (d.kind === 'pay') { pay.push({ n: name, a: a }); return; }   // เหรียญ/แต้มแทนเงินสด = เงินของคนจ่าย ไม่ใช่ส่วนลด
+      if (d.kind === 'pay' || AI_PAY_RE.test(name)) { pay.push({ n: name, a: a }); return; }   // เหรียญ/แต้มแทนเงินสด = เงินของคนจ่าย ไม่ใช่ส่วนลด
       const find = k => { k = String(k || '').trim(); return k ? its.find(x => x.name === k) || aiDiscTarget_(k, its) : null; };
       // โปรจับคู่: แบ่งส่วนลดให้สินค้าที่ร่วมโปรตามสัดส่วนราคา
       const group = Array.from(new Set((Array.isArray(d.items) ? d.items : []).map(find).filter(Boolean)));
@@ -291,7 +291,7 @@ function aiNormalize_(j, cats, model) {
   };
   // แบบที่ 2 (เดิม): items[].discount + บรรทัดส่วนลดที่แยกมา + discount ท้ายบิล
   const fromItems = () => {
-    const its = baseItems(), bill = [];
+    const its = baseItems(), bill = [], pay = [];
     raw.filter(it => !isDiscLine(it)).forEach(it => {
       const t = its.find(x => x.name === String(it.name || '').trim().slice(0, 60) && !x.discs.length);
       const a = t ? Math.min(n(it.discount), t.price) : 0;
@@ -301,6 +301,7 @@ function aiNormalize_(j, cats, model) {
     raw.filter(isDiscLine).forEach(it => {
       const a = r2(Math.abs(num(it.price))), name = String(it.name || '').trim().slice(0, 40);
       if (!a) return;
+      if (AI_PAY_RE.test(name)) { pay.push({ n: name, a: a }); return; }
       const t = aiDiscTarget_(name, its);
       if (t && Math.abs(t.disc - a) < 0.01) return;               // AI ใส่ส่วนลดนี้ไว้ที่สินค้าแล้ว ไม่นับซ้ำ
       if (t && t.disc + a <= t.price) addDisc(t, name, a);
@@ -312,7 +313,7 @@ function aiNormalize_(j, cats, model) {
     if (extra && bd && Math.abs(bd - extra) < 0.5) bd = 0;
     if (itemDisc && bd && Math.abs(bd - itemDisc) < 0.5) bd = 0;
     if (bd) bill.push({ n: 'ส่วนลดท้ายบิล', a: r2(bd) });
-    return { items: its, bill: bill, pay: [] };
+    return { items: its, bill: bill, pay: pay };
   };
   const service = n(j.service_charge), incVat = j.prices_include_vat !== false;
   const vatAdd = incVat ? 0 : n(j.vat_amount);   // ใช้เฉพาะยอด VAT ที่พิมพ์จริง ไม่ใช้ค่าประมาณ
@@ -355,6 +356,8 @@ function aiNormalize_(j, cats, model) {
   };
 }
 
+// เหรียญ ALL member / แสตมป์ ที่ใช้แทนเงินสด = คนจ่ายออกเงินก่อน (ไม่ใช่ส่วนลดของทุกคน) ไม่ว่า AI จะตั้ง kind เป็นอะไร
+const AI_PAY_RE = /เหรียญ|all\s*member|ออลเมม|แสตมป์|สแตมป์|stamp/i;
 const AI_DISC_RE = /^\s*(?:ส่วนลด|ลด\s|discount|disc\.?\s|โปรโมชั่น|โปร\s|คูปอง|coupon|[A-Za-z0-9]{1,6}\s?(?:ลด|คูปอง))/i;   // ตรงกับ owe.js / hk.js
 /** หาสินค้าที่บรรทัดส่วนลดพูดถึง เช่น "ส่วนลดน้ำแร่เพอร์ร่า" → "น้ำแร่เพอร์ร่า 1500" (ต้องมีคำร่วมกัน ≥4 ตัว) */
 function aiDiscTarget_(discName, list) {
