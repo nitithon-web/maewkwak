@@ -1,4 +1,4 @@
-/* จดครบ — ตัวช่วยร่วมของหน้าเงิน / หารกัน (โหลดก่อน money.js / split.js) */
+/* แมวกวัก — ตัวช่วยร่วมของหน้าเงิน / หารกัน (โหลดก่อน money.js / split.js) */
 const $ = s => document.querySelector(s);
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },

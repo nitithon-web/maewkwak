@@ -17,7 +17,8 @@ const SCATS = [
 ];
 const scatOf = k => SCATS.find(c => c.k === k);
 const sugObj = s => typeof s === 'string' ? { n: s } : s;
-function scatIcon(s) { const c = scatOf(s && s.cat); return c ? c.ic : ''; }
+const catOf = s => s ? s.cat || (typeof scatGuess === 'function' ? scatGuess(s.title) : '') : '';   // บิลที่ไม่มีหมวด → เดาจากชื่อ
+function scatIcon(s) { const c = scatOf(catOf(s)); return c ? c.ic : ''; }
 function scatMoney(s) { const c = scatOf(s && s.cat); return c ? c.money : ''; }
 
 /* ---------- 🏷 เลือกหมวด (หัวหน้าต่างหารกัน) ---------- */
@@ -27,6 +28,8 @@ function paintCat() {
   box.innerHTML = SCATS.map(c => `<button type="button" data-k="${c.k}" class="${sp.cat === c.k ? 'on' : ''}">${c.ic} ${esc(c.n)}</button>`).join('');
   const on = box.querySelector('.on');
   box.scrollLeft = on ? Math.max(0, on.offsetLeft - 40) : 0;
+  const t = sp.tplId && tpls().find(x => x.id === sp.tplId), up = $('#sTplUp');
+  if (up) { up.hidden = !t; if (t) up.textContent = `🔄 อัปเดตชุด "${t.name}" ให้เป็นแบบบิลนี้`; }
 }
 const billBlank = b => !toS(b.total) && !Object.values(b.custom || {}).some(v => toS(v))
   && !(b.items || []).some(it => it.name || toS(it.price)) && !(b.lines || []).some(l => l.name || toS(l.price));
@@ -43,6 +46,12 @@ function setCat(k) {
   paintCat(); paintSplit();
 }
 if ($('#sCat')) $('#sCat').onclick = e => { const c = e.target.closest('button'); if (c && sp) setCat(c.dataset.k); };
+/* พิมพ์ชื่อบิลเสร็จ แล้วยังไม่ได้เลือกหมวด → เดาหมวดจากชื่อให้ (เปลี่ยนได้) */
+if ($('#sForm')) $('#sForm').elements.title.addEventListener('change', e => {
+  if (!sp || sp.cat) return;
+  const k = scatGuess(e.target.value);
+  if (k) { sp.cat = k; paintCat(); }
+});
 
 /* รายการแนะนำของหมวด ใต้แต่ละบิล → แตะเพิ่มเป็นแถว */
 function paintSug(b, box) {
@@ -173,9 +182,9 @@ const SCAT_KW = [
   ['movie', /major|เมเจอร์|sf\s*cinema|เอสเอฟ|โรงหนัง|cinema|ป๊อปคอร์น|popcorn|ตั๋วหนัง/i],
   ['trip', /โรงแรม|hotel|resort|รีสอร์ท|agoda|booking\.com|ที่พัก|airbnb|โฮมสเตย์|homestay/i],
   ['ride', /grab(?!\s*food)|bolt|taxi|แท็กซี่|ทางด่วน|easy\s*pass|ค่ารถ|เติมน้ำมัน|ปตท|ptt|บางจาก|bangchak|shell|caltex|ค่าจอด/i],
-  ['home', /ค่าไฟ|การไฟฟ้า|ค่าน้ำประปา|การประปา|ค่าเน็ต|อินเทอร์เน็ต|internet|3bb|ais\s*fibre|true\s*online|netflix|spotify|youtube\s*premium|ค่าส่วนกลาง/i],
+  ['home', /ค่าไวไฟ|ไวไฟ|wi-?fi|ค่าเน็ต|ค่าไฟ|การไฟฟ้า|ค่าน้ำประปา|การประปา|ค่าเน็ต|อินเทอร์เน็ต|internet|3bb|ais\s*fibre|true\s*online|netflix|spotify|youtube\s*premium|ค่าส่วนกลาง/i],
   ['drink', /เบียร์|beer|เหล้า|ผับ|\bpub\b|\bbar\b|บาร์|ลีโอ|ช้าง|สิงห์|heineken|โซจู|soju/i],
-  ['food', /ร้านอาหาร|อาหาร|ชาบู|shabu|หมูกระทะ|บุฟเฟ่|buffet|ก๋วยเตี๋ยว|ข้าว|kfc|\bmk\b|grab\s*food|line\s*man|foodpanda|robinhood|ซูชิ|sushi|ปิ้งย่าง|steak|สเต็ก|pizza|พิซซ่า|cafe|คาเฟ่/i],
+  ['food', /ร้านอาหาร|อาหาร|ชาบู|shabu|หมูกระทะ|หมูกะทะ|กะเพรา|กระเพรา|ส้มตำ|ผัด|ต้มยำ|แกง|ตลาด|เซฟวัน|save\s*one|บุฟเฟ่|buffet|ก๋วยเตี๋ยว|ข้าว|kfc|\bmk\b|grab\s*food|line\s*man|foodpanda|robinhood|ซูชิ|sushi|ปิ้งย่าง|steak|สเต็ก|pizza|พิซซ่า|cafe|คาเฟ่/i],
 ];
 function scatGuess(text) {
   const t = String(text || '');
@@ -200,7 +209,8 @@ function tplFromSplit(keep) {
       title: b.title || '', payer: b.payer, method: b.method, who: [...(b.who || [])], svc: !!b.svc, vat: !!b.vat,
       total: keep ? b.total || '' : '', custom: keep ? { ...(b.custom || {}) } : {},
       items: (b.items || []).filter(it => it.name).map(it => ({ name: it.name, price: keep ? it.price || '' : '', who: [...(it.who || [])], all: !!it.all })),
-      lines: (b.lines || []).filter(l => l.name || toS(l.price)).map(l => ({ name: l.name, price: keep || l.rate ? l.price || '' : '', unit: l.unit || '', rate: !!l.rate, step: l.step || 1, def: l.def || 1, u: {} })),
+      lines: (b.lines || []).filter(l => l.name || toS(l.price)).map(l => ({ name: l.name, price: l.price || '',   // ค่าสนาม/ค่าห้อง/ราคาต่อลูก มักเท่าเดิม → จำไว้เสมอ
+        unit: l.unit || '', rate: !!l.rate, step: l.step || 1, def: l.def || 1, u: {} })),
     })),
   };
 }
@@ -247,6 +257,19 @@ if ($('#tDlg')) {
   });
 }
 if ($('#sTpl')) $('#sTpl').onclick = () => { if (sp) openTplDlg(); };
+/* 🔄 อัปเดตชุดเดิมจากบิลที่เปิดอยู่ (คน หมวด รายการ ราคาที่จำไว้) · ชื่อชุด / วันเตือน คงเดิม */
+if ($('#sTplUp')) $('#sTplUp').onclick = async () => {
+  const t = sp && sp.tplId && tpls().find(x => x.id === sp.tplId);
+  if (!t) return;
+  const next = tplFromSplit(t.keep);
+  next.people = [...new Set([...(t.people || []), ...next.people])];   // คนที่ไม่มาครั้งนี้ยังอยู่ในกลุ่ม · คนใหม่เพิ่มเข้าไป
+  const names = next.people.filter(p => p !== ME).join(', ') || '-';
+  if (!confirm(`อัปเดตชุด "${t.name}" ให้เป็นแบบบิลนี้?\nคน: ${names}\nรายการ: ${next.bills.flatMap(b => [...b.items, ...b.lines].map(x => x.name)).filter(Boolean).join(', ') || (next.title || '-')}${t.keep ? '\n(จำยอดเงินตามบิลนี้)' : ''}`)) return;
+  const nt = Object.assign({}, t, next, { id: t.id, kind: 'tpl', name: t.name, monthly: t.monthly || 0, lastRemind: t.lastRemind || '', created: t.created, used: t.used });
+  await saveDocs([nt]);
+  paintCat();
+  toast(`🔄 อัปเดตชุด "${t.name}" แล้ว`);
+};
 /* เปิดบิลใหม่จากชุด */
 function openFromTpl(t) {
   openSplit();
@@ -301,7 +324,7 @@ function renderMonth() {
   const byCat = {}, byGroup = {};
   let mine = 0, all = 0;
   list.forEach(s => {
-    const m = mineOf(s), c = scatOf(s.cat) || { k: '', ic: '🧾', n: 'ไม่ระบุหมวด' };
+    const m = mineOf(s), c = scatOf(catOf(s)) || { k: '', ic: '🧾', n: 'ไม่ระบุหมวด' };
     mine += m; all += toS(s.total);
     const a = byCat[c.k] || (byCat[c.k] = { c, n: 0, s: 0 }); a.n++; a.s += m;
     const g = (s.people || []).filter(p => p !== ME).sort().join(', ') || 'คนเดียว';

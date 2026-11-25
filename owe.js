@@ -1,4 +1,4 @@
-/* จดครบ — 🤝 ค้างกัน: ให้ยืม / ยืมเขา / หารกัน (เท่ากัน · ระบุเอง · ตามเมนู · ทริปหลายบิล) + ทยอยคืน
+/* แมวกวัก — 🤝 ค้างกัน: ให้ยืม / ยืมเขา / หารกัน (เท่ากัน · ระบุเอง · ตามเมนู · ทริปหลายบิล) + ทยอยคืน
  * ใช้ตัวช่วยจาก money.js: $, api, baht, esc, uid, today, toast, showStatus, items, upsert, guessCat, prepare
  * หลักบัญชี: ให้ยืม/รับคืน ไม่นับเป็นรายจ่าย/รายรับ · หารกัน = จดรายจ่ายเฉพาะส่วนของเรา · "ไม่ทวงแล้ว" = ย้ายยอดที่เหลือไปเป็นรายจ่าย
  */
@@ -381,6 +381,7 @@ function openSplit(s, silent) {
   f.title.value = sp.title; f.date.value = sp.date;
   f.date.oninput = () => { sp.dateTouched = true; };
   $('#sDel').hidden = !s;
+  if (s && !sp.cat && typeof scatGuess === 'function') sp.cat = scatGuess(sp.title);   // บิลเก่าที่ยังไม่มีหมวด
   if (typeof paintCat === 'function') paintCat();
   paintSplit();
   if (!silent) $('#sDlg').showModal();
@@ -767,7 +768,7 @@ function paintSum() {
   const mine = r.share[ME] || 0;
   const rcpt = sp.bills.reduce((s2, b) => s2 + toS(b.rTotal || 0), 0);
   const diff = rcpt && Math.abs(rcpt - r.total) >= 100 ? `<p class="note warn">⚠️ ยอดที่หาร ${bahtS(r.total)} ไม่ตรงกับยอดในใบเสร็จ ${bahtS(rcpt)} (ต่าง ${bahtS(Math.abs(rcpt - r.total))}) ลองเช็ก Service / VAT / ส่วนลด หรือเมนูที่ขาด</p>` : '';
-  const pays = sp.bills.map((b, bi) => (b.pays || []).length ? `<p class="note">💳 คนจ่ายใช้ ${esc(b.pays.map(d => d.n).join(', '))} ${bahtS(b.pays.reduce((x, d) => x + toS(d.a), 0))} แทนเงินสด · นับเป็นเงินของ${esc(who(b.payer))} เพื่อนจ่ายตามราคาจริง <button type="button" class="link-btn pay-share" data-b="${bi}">หารเป็นส่วนลดทุกคนแทน</button></p>` : '').join('');
+  const pays = sp.bills.map((b, bi) => (b.pays || []).length ? `<p class="note">💳 คนจ่ายใช้ ${esc(b.pays.map(d => d.n).join(', '))} ${bahtS(b.pays.reduce((x, d) => x + toS(d.a), 0))} แทนเงินสด · นับเป็นเงินที่${esc(who(b.payer))}ออกก่อน เพื่อนจ่ายตามราคาจริง <button type="button" class="link-btn pay-share" data-b="${bi}">หารเป็นส่วนลดทุกคนแทน</button></p>` : '').join('');
   $('#sSum').innerHTML = `<h4>ส่วนของแต่ละคน</h4>${rows}<div class="tot"><span>รวม</span><b>${bahtS(r.total)}</b></div>${discBox(sp.bills, sp.people, 'edit')}${pays}${diff}${tr}${typeof sumExtra === 'function' && r.transfers.length + (sp.round ? 1 : 0) ? sumExtra(r) : ''}
     <p class="note">📒 จดลงรายจ่ายเฉพาะส่วนของเรา <b>${bahtS(mine)}</b> · ที่เหลือเป็น "ค้างกัน" ไม่ทำให้ยอดใช้จ่ายเพี้ยน</p>`;
 }

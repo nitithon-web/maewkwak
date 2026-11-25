@@ -1,4 +1,4 @@
-/* จดครบ — ศูนย์รวมรหัสผ่าน
+/* แมวกวัก — ตู้รหัสส่วนตัว
  * เข้ารหัส/ถอดรหัสในเครื่องเท่านั้น (PBKDF2-SHA256 → AES-256-GCM)
  * Google Sheet เก็บแค่ข้อมูลที่เข้ารหัสแล้ว รหัสหลักไม่ถูกส่งไปที่ไหน
  */
@@ -155,34 +155,6 @@ async function decryptAll() {
   items = out;
   if (bad) showStatus(`ถอดรหัสไม่ได้ ${bad} รายการ`);
   render();
-  setTimeout(takeFromInbox, 300);
-}
-
-/* 🔒 รับโน้ตที่มีรหัส/คีย์ จากกล่องฝาก (ส่งมาทาง sessionStorage ในเครื่องเดียวกัน ไม่ผ่านเน็ต)
-   → เก็บเป็น 1 รายการ (ข้อความทั้งหมดอยู่ในช่องโน้ต) แล้วถามว่าจะลบโน้ตต้นทางไหม */
-let taking = false;
-async function takeFromInbox() {
-  let src = null;
-  try { src = JSON.parse(sessionStorage.getItem('vaultFromInbox') || 'null'); } catch (e) {}
-  if (!src || !key || taking) return;
-  if (!confirm(`เก็บโน้ต "${src.name}" จากกล่องฝากเข้า${SPACE_NAME[space]}?\n(ข้อความทั้งหมดจะอยู่ในช่องโน้ต แก้ชื่อ/แยกช่องทีหลังได้)`)) {
-    sessionStorage.removeItem('vaultFromInbox'); return;
-  }
-  taking = true;
-  try {
-    const data = { name: src.name, cat: '🔖 อื่นๆ', user: '', pass: '', url: '', note: src.text };
-    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^A-Za-z0-9]/g, '');
-    const sealed = { id, ...(await encryptJSON(key, data)) };
-    await api('vault_save_many', { items: [sealed] });
-    vault.items.push(sealed); items.push({ id, ...data }); render();
-    sessionStorage.removeItem('vaultFromInbox');
-    if (confirm('เก็บเข้าตู้แล้ว ✓\nลบโน้ตต้นทางในกล่องฝากเลยไหม? (แนะนำ เพราะโน้ตในกล่องฝากไม่ได้เข้ารหัส)')) {
-      await api('inbox_delete', { id: src.id });
-      try { const c = JSON.parse(localStorage.getItem('inbox') || '[]'); localStorage.setItem('inbox', JSON.stringify(c.filter(o => o.id !== src.id))); } catch (e) {}
-      showStatus('✓ ย้ายเข้าตู้และลบโน้ตต้นทางแล้ว', true); setTimeout(() => showStatus(''), 4000);
-    }
-  } catch (e) { showStatus('ย้ายเข้าตู้ไม่สำเร็จ: ' + e.message); }
-  finally { taking = false; }
 }
 
 /* ตั้งรหัสหลักครั้งแรก */
@@ -809,7 +781,7 @@ $('#bakFile').addEventListener('change', async e => {
   if (!file || !key) return;
   let bk;
   try { bk = JSON.parse(await file.text()); } catch { $('#bakInfo').textContent = 'ไฟล์ไม่ถูกต้อง'; return; }
-  if (bk.app !== 'jodkrob-vault' || !Array.isArray(bk.items) || !bk.salt) { $('#bakInfo').textContent = 'ไม่ใช่ไฟล์สำรองตู้รหัสของจดครบ'; return; }
+  if (bk.app !== 'jodkrob-vault' || !Array.isArray(bk.items) || !bk.salt) { $('#bakInfo').textContent = 'ไม่ใช่ไฟล์สำรองตู้รหัส'; return; }
   // ไฟล์จากตู้เดียวกัน (salt เดียวกัน) ใช้กุญแจที่เปิดอยู่ได้เลย · ตู้อื่น/รหัสหลักเก่า ให้เจ้าของพิมพ์รหัสหลักของไฟล์นั้นเองในช่องด้านล่าง
   if (bk.salt !== vault.salt) { bakPending = bk; $('#bakPwRow').hidden = false; $('#bakPw').value = ''; $('#bakPw').focus(); return; }
   restoreFrom(bk, key);
@@ -883,7 +855,7 @@ $('#bioGo').onclick = async () => {
   try {
     const ps = rand(32);
     const cred = await navigator.credentials.create({ publicKey: {
-      rp: { name: 'จดครบ ตู้รหัส' }, user: { id: rand(16), name: 'jodkrob-vault-' + space, displayName: SPACE_NAME[space] },
+      rp: { name: 'แมวกวัก ตู้รหัส' }, user: { id: rand(16), name: 'jodkrob-vault-' + space, displayName: SPACE_NAME[space] },
       challenge: rand(32), pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
       timeout: 60000, extensions: { prf: { eval: { first: ps } } } } });
