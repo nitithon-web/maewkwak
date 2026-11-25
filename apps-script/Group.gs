@@ -29,7 +29,7 @@ const HK_WEB = 'https://nitithon-web.github.io/maewkwak/';   // แอปเล�
 const HK_FOLDER = 'แมวกวัก - หารกลุ่ม';
 // 🏷 หมวดของบิลในเว็บ (แอปเล็ก) → หมวดรายจ่ายส่วนของเจ้าของ · ตรงกับ SCATS ในแอป
 const HK_CAT_MONEY = { food: 'อาหาร', mart: 'อาหาร', sport: 'ออกกำลังกาย', karaoke: 'บันเทิง/ท่องเที่ยว', drink: 'เครื่องดื่ม/กาแฟ', ride: 'เดินทาง', trip: 'บันเทิง/ท่องเที่ยว', movie: 'บันเทิง/ท่องเที่ยว', home: 'ค่าน้ำไฟ/โทรศัพท์', gift: 'อื่นๆ' };
-const GRP_CMD = /^(แมวกวัก|น้องแมว|หาร|หารกัน|ค้าง|ใครค้าง|ใครยังไม่จ่าย|ยังไม่จ่าย|ทวง|#ทวง|ทวงหน่อย|จ่ายแล้ว|โอนแล้ว|ลบบิล|ยกเลิกบิล|พร้อมเพย์|พร้อมเพ|ชื่อ|วิธีใช้|ช่วย|help|เตือนทุกวัน|เปิดหาร|ปิดหาร)/i;
+const GRP_CMD = /^(แมวกวัก|น้องแมว|หาร|หารกัน|ค้าง|ใครค้าง|ใครยังไม่จ่าย|ยังไม่จ่าย|ทวง|#ทวง|ทวงหน่อย|จ่ายแล้ว|โอนแล้ว|ลบบิล|ยกเลิกบิล|พร้อมเพย์|พร้อมเพ|ชื่อ|วิธีใช้|ช่วย|help|เตือนทุกวัน|เปิดหาร|ปิดหาร|กองกลาง|กอง)/i;
 
 const GRP_HELP = [
   '👥 หารกันในกลุ่ม',
@@ -40,6 +40,7 @@ const GRP_HELP = [
   'ทางลัดแบบพิมพ์',
   '• หาร 1200 ชาบู @เอ @บี (+ชื่อ = คนนอกกลุ่ม, +ต้น@เอ = เอจ่ายแทนต้น)',
   '• ค้าง · ทวง · จ่ายแล้ว · ลบบิล',
+  '• กองกลาง = สรุปยอดกองกลางของทริปที่เปิดอยู่',
   '• ชื่อ เอ็ม = ตั้งชื่อที่เพื่อนเห็น',
   '• พร้อมเพย์ 08xxxxxxxx = เบอร์รับเงินของเรา',
 ].join('\n');
@@ -316,6 +317,10 @@ function grpHandle_(ev) {
     return reply_(ev.replyToken, 'ปิดหารกันในกลุ่มนี้แล้ว บิลเดิมยังเก็บไว้ เปิดใหม่พิมพ์ เปิดหาร');
   }
   if (/^(วิธีใช้|ช่วย|help)$/i.test(text)) return grpReplyMsgs_(ev.replyToken, [grpText_(GRP_HELP), hkSummonFlex_(gid)]);
+  if (/^(กองกลาง|กอง)$/.test(text)) {   // 🏦 สรุปกองกลางที่เปิดอยู่ในกลุ่มนี้
+    const pls = poolList_(gid).filter(x => x.status === 'open');
+    return grpReplyMsgs_(ev.replyToken, pls.length ? pls.slice(0, 5).map(x => poolFlex_(x)) : [grpText_('ยังไม่มีกองกลางที่เปิดอยู่ในกลุ่มนี้\nสร้างได้ในหน้าหารกัน: พิมพ์ แมวกวัก แล้วกด ยอดของฉัน → + สร้างกองกลาง')]);
+  }
   if (/^(หาร|หารกัน|แมวกวัก|น้องแมว)$/.test(text) || (tagBot && !GRP_CMD.test(text))) return grpReplyMsgs_(ev.replyToken, hkSummonFlex_(gid));
 
   const name = grpName_(src, uid);   // เรียก LINE นอกล็อก
@@ -868,6 +873,10 @@ function hkCreate_(me, grp, p, old) {
   const seen = (grpCfg_()[gid] || {}).seen || {};
   const totalS = Math.round(Number(p.totalS) || 0);
   if (totalS <= 0 || totalS > 100000000) throw new Error('ยอดรวมไม่ถูกต้อง');
+  if (p.pool && !old && grp) {   // 🏦 กองแบบหารเท่ากันทั้งกอง: ทุกบิลหารเท่ากันทุกคนในกองเสมอ (ไม่สนยอดรายคนที่ส่งมา)
+    const pl = poolGet_(p.pool, grp);
+    if (pl.equal) p = Object.assign({}, p, poolEqualSplit_(pl, totalS));
+  }
   const mode = /^(equal|hours|items|custom)$/.test(p.mode) ? p.mode : 'custom';
   const keys = {};
   const members = (Array.isArray(p.members) ? p.members : []).slice(0, 40).map(x => {
@@ -924,13 +933,13 @@ function hkCreate_(me, grp, p, old) {
   grpSave_(b);
   if (pool) {
     const v = poolView_(pool, me);
-    return { pool: v, msg: grpText_('🏦 จ่ายจากกองกลาง "' + pool.name + '": ' + b.title + ' ' + grpB_(b.totalS) + '\nกองเหลือ ' + grpB_(v.leftS) + ' · ดูยอดของแต่ละคนในหน้ากองกลาง') };
+    return { pool: v, msg: poolFlex_(pool, b) };
   }
   return { bill: hkView_(b, me), msg: hkCardFlex_(b, old ? 'แก้บิล' : 'บิลใหม่') };
 }
 
 /* ===================== 🏦 กองกลางในกลุ่ม =====================
- * pool (แถวในแท็บ Group, kind:'pool'): { name, holder{uid,name}, members[{k,uid,name,inS}], holderInS, status open|closed, contrib (id บิลลงกอง), topup (id บิลเติมกอง), refunds[{k,name,amtS,done}] }
+ * pool (แถวในแท็บ Group, kind:'pool'): { name, holder{uid,name}, members[{k,uid,name,inS}], holderInS, equal (หารเท่ากันทั้งกอง), status open|closed, contrib (id บิลลงกอง), topup (id บิลเติมกอง), refunds[{k,name,amtS,done}] }
  * บิลลงกอง/เติมกอง = บิลปกติ (คนถือกองเป็นคนรับเงิน) + noOwe · บิลที่จ่ายจากกอง = status 'pool', poolRole 'spend' (ไม่มีใครต้องโอน)
  * ปิดกอง: คงเหลือของแต่ละคน = ลงกองจริง (แจ้งโอนแล้ว) − ส่วนที่ใช้ → ติดลบ = บิลเติมกอง · บวก = คนถือกองคืนให้ (ติ๊กคืนแล้ว) */
 function poolList_(gid) { return grpRows_(true).filter(x => x.kind === 'pool' && x.gid === gid && x.status !== 'void'); }
@@ -954,7 +963,43 @@ function poolCalc_(pool) {
   const list = Object.values(people);
   list.forEach(x => { x.balS = x.inS - x.useS; });
   const inS = list.reduce((s, x) => s + x.inS, 0), spentS = spends.reduce((s, b) => s + b.totalS, 0);
-  return { list: list, bills: spends.map(b => ({ title: b.title, totalS: b.totalS, date: b.date })), inS: inS, planS: list.reduce((s, x) => s + x.planS, 0), spentS: spentS, leftS: inS - spentS };
+  return { list: list, bills: spends.map(b => ({ id: b.id, title: b.title, totalS: b.totalS, date: b.date, cat: b.cat || '' })).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0), inS: inS, planS: list.reduce((s, x) => s + x.planS, 0), spentS: spentS, leftS: inS - spentS };
+}
+/** หารเท่ากันทุกคนในกอง (คนถือกอง + สมาชิก) · เศษสตางค์อยู่กับคนถือกอง */
+function poolEqualSplit_(pool, totalS) {
+  const n = pool.members.length + 1, each = Math.floor(totalS / n);
+  return { mode: 'equal', payerIn: true, payerShareS: totalS - each * pool.members.length, items: [], payerItems: [], unit: '',
+    members: pool.members.map(m => ({ uid: m.uid, amtS: each })) };
+}
+/** การ์ดกองกลาง: แจ้งในกลุ่มทุกครั้งที่จ่ายจากกอง (spent = บิลที่เพิ่งจ่าย) และตอนพิมพ์ กองกลาง */
+function poolFlex_(pool, spent) {
+  const c = poolCalc_(pool), tok = grpEnsureTok_(pool.gid) || '';
+  const pct = c.inS > 0 ? Math.max(0, Math.min(100, Math.round(c.spentS * 100 / c.inS))) : (c.spentS ? 100 : 0);
+  const over = c.leftS < 0, n = c.list.length;
+  const top = c.list.slice().sort((a, b) => a.balS - b.balS).slice(0, 8).map(x => ({ type: 'box', layout: 'horizontal', contents: [
+    { type: 'text', text: x.name, size: 'xs', color: HK_INK, flex: 5 },
+    { type: 'text', text: 'ใช้ ' + grpB_(x.useS), size: 'xs', color: HK_MUTE, align: 'end', flex: 4 },
+    { type: 'text', text: (x.balS < 0 ? 'ขาด ' : x.balS > 0 ? 'เหลือ ' : '') + grpB_(Math.abs(x.balS)), size: 'xs', color: x.balS < 0 ? '#8a4b1f' : '#2f6b3e', align: 'end', flex: 4 }] }));
+  const head = spent ? [
+      { type: 'text', text: '🏦 จ่ายจากกอง ' + pool.name, size: 'xs', color: '#3a3f39' },
+      { type: 'text', text: cut_(spent.title, 40) + '  ' + grpB_(spent.totalS), weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
+      { type: 'text', text: pool.equal ? 'หารเท่ากัน ' + n + ' คน · คนละ ' + grpB_(Math.floor(spent.totalS / n)) : 'ยอดของแต่ละคนดูในหน้ากองกลาง', size: 'xs', color: HK_MUTE, wrap: true }]
+    : [{ type: 'text', text: '🏦 กองกลาง', size: 'xs', color: '#3a3f39' }, { type: 'text', text: pool.name, weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
+      { type: 'text', text: pool.holder.name + 'ถือกอง' + (pool.equal ? ' · หารเท่ากันทั้งกอง' : ''), size: 'xs', color: HK_MUTE, wrap: true }];
+  return { type: 'flex', altText: (spent ? '🏦 จ่ายจากกอง ' + pool.name + ': ' + cut_(spent.title, 30) + ' ' + grpB_(spent.totalS) + ' · ' : '🏦 กองกลาง ' + pool.name + ': ') + (over ? 'กองขาด ' : 'เหลือ ') + grpB_(Math.abs(c.leftS)),
+    contents: { type: 'bubble', size: 'kilo',
+      body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: head.concat([
+        { type: 'separator', margin: 'md' },
+        { type: 'box', layout: 'horizontal', margin: 'md', contents: [
+          { type: 'text', text: over ? 'กองขาด' : 'เงินกองเหลือ', size: 'sm', color: HK_MUTE, flex: 1 },
+          { type: 'text', text: grpB_(Math.abs(c.leftS)), size: 'xl', weight: 'bold', color: over ? '#8a4b1f' : HK_INK, align: 'end', flex: 1 }] },
+        { type: 'box', layout: 'vertical', height: '8px', backgroundColor: '#e6e8e3', cornerRadius: '4px', contents: [
+          { type: 'box', layout: 'vertical', height: '8px', width: Math.max(pct, 2) + '%', backgroundColor: over ? '#8a4b1f' : HK_INK, cornerRadius: '4px', contents: [{ type: 'filler' }] }] },
+        { type: 'text', text: 'ใช้ไป ' + grpB_(c.spentS) + ' จาก ' + grpB_(c.inS) + ' (' + pct + '%) · ' + c.bills.length + ' บิล', size: 'xxs', color: HK_MUTE, wrap: true },
+        { type: 'separator', margin: 'md' },
+        { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: top }]) },
+      footer: { type: 'box', layout: 'vertical', contents: [
+        { type: 'button', style: 'primary', color: HK_INK, height: 'sm', action: { type: 'uri', label: 'ดูสรุปกองกลาง', uri: hkUrl_(tok, '', 'p=' + pool.id) } }] } } };
 }
 function poolBrief_(pool, me) {
   const c = poolCalc_(pool), mine = c.list.find(x => x.k === me.uid);
@@ -962,7 +1007,7 @@ function poolBrief_(pool, me) {
 }
 function poolView_(pool, me) {
   const c = poolCalc_(pool), isHolder = pool.holder.uid === me.uid;
-  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, contrib: pool.contrib || '', topup: pool.topup || '',
+  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, equal: !!pool.equal, contrib: pool.contrib || '', topup: pool.topup || '',
     inS: c.inS, planS: c.planS, spentS: c.spentS, leftS: c.leftS, bills: c.bills,
     rows: c.list.map(x => ({ k: x.k, name: x.name, me: x.k === me.uid, holder: x.k === pool.holder.uid, planS: x.planS, inS: x.inS, st: x.st, useS: x.useS, balS: x.balS })),
     refunds: (pool.refunds || []).map(r => ({ k: r.k, name: r.name, amtS: r.amtS, done: !!r.done, me: r.k === me.uid })),
@@ -984,7 +1029,7 @@ function poolNew_(me, grp, p) {
   }).filter(Boolean);
   if (!members.length) throw new Error('เลือกคนที่ลงกองอย่างน้อย 1 คน');
   const pool = { id: Utilities.getUuid().replace(/-/g, ''), gid: grp.gid, token: grpTok_(), kind: 'pool', v: 1, name: name, created: stamp_(), status: 'open',
-    holder: { uid: me.uid, name: me.disp }, holderInS: Math.max(0, Math.round(Number(p.myInS) || 0)), members: members, refunds: [] };
+    holder: { uid: me.uid, name: me.disp }, holderInS: Math.max(0, Math.round(Number(p.myInS) || 0)), members: members, equal: !!p.equal, refunds: [] };
   let msg = null;
   const pay = members.filter(m => m.inS > 0);
   if (pay.length) {
