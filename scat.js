@@ -433,3 +433,27 @@ function poolDetail(s) {
   return `<div class="di-bill"><div class="di-h">🏦 กองกลาง · ${esc(who(pl.holder))}ถือเงินกอง</div>${(s.people || []).filter(p => toS(pl.c[p])).map(p => `<div class="di-r"><span>${esc(who(p))} ลงกอง</span><b>${bahtS(toS(pl.c[p]))}</b></div>`).join('')}
     <div class="di-r"><span>จ่ายบิลจากกอง</span><b>${bahtS(pl.spent)}</b></div><div class="di-r tot"><span>${pl.left >= 0 ? 'เงินกองเหลือ (คืนในยอดโอน)' : 'กองขาด (คนถือกองออกเพิ่ม)'}</span><b>${bahtS(Math.abs(pl.left))}</b></div></div>`;
 }
+
+
+/* ===================== 🏦 กองกลางในกลุ่ม LINE (ดูจากแอป) =====================
+ * หลังบ้าน money_gpools · แคช LS gpools · กดแล้วเปิดหน้ากองในเว็บ (LINE) */
+function paintGPools(list) {
+  const box = document.getElementById('spGPools');
+  if (!box) return;
+  if (!list || !list.length) { box.innerHTML = ''; return; }
+  const b = s => '฿' + (Math.round(s) / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+  box.innerHTML = `<div class="sp-gp-h">🏦 กองกลางในกลุ่ม LINE</div>` + list.map(x => {
+    const pct = x.inS > 0 ? Math.min(100, Math.round(x.spentS * 100 / x.inS)) : (x.spentS ? 100 : 0), over = x.leftS < 0;
+    const my = x.status === 'open' ? (x.myBalS > 0 ? 'ของฉันเหลือ ' + b(x.myBalS) : x.myBalS < 0 ? 'ของฉันใช้เกิน ' + b(-x.myBalS) : 'ของฉันพอดี')
+      : (x.myBalS < 0 ? 'ต้องเติม ' + b(-x.myBalS) : x.myBalS > 0 ? (x.refund === 'got' ? 'ได้คืนแล้ว ' : 'รอคืน ') + b(x.myBalS) : 'ไม่ต้องเติม/คืน');
+    return `<a class="sp-gp" href="${x.url}" target="_blank" rel="noopener">
+      <div class="sp-gp-top"><span class="sp-gp-n">${esc(x.name)}${x.status === 'closed' ? ' · ปิดแล้ว' : ''}</span><span class="sp-gp-amt ${over ? 'bad' : ''}">${over ? 'ขาด ' : 'เหลือ '}${b(Math.abs(x.leftS))}</span></div>
+      <div class="sp-gp-bar ${over ? 'over' : ''}"><i style="width:${Math.max(pct, x.spentS ? 2 : 0)}%"></i></div>
+      <div class="sp-gp-sub">${esc([x.group, (x.isHolder ? 'ฉัน' : x.holder) + 'ถือกอง', x.n + ' คน', x.bills + ' บิล'].filter(Boolean).join(' · '))} · ${my}</div></a>`;
+  }).join('') + `<div class="sp-gp-note">ใช้/เพิ่มบิลจากกองได้ในกลุ่ม LINE · แตะเพื่อเปิด</div>`;
+}
+(function loadGPools() {
+  if (!document.getElementById('spGPools') || typeof api !== 'function') return;
+  try { paintGPools(JSON.parse(localStorage.getItem('gpools') || '[]')); } catch (e) {}
+  api('money_gpools').then(r => { try { localStorage.setItem('gpools', JSON.stringify(r.pools || [])); } catch (e) {} paintGPools(r.pools || []); }).catch(() => {});
+})();

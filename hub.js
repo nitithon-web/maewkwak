@@ -128,7 +128,7 @@ if (window.JK_APP === 'money') {
       <h3>อื่นๆ</h3>
       <div class="ui-links">
         ${document.getElementById('btnSettings') ? `<button type="button" data-go="conn">${ICO.link}<span>เชื่อมเครื่อง / ดึงข้อมูลใหม่</span></button>` : ''}
-        ${window.JK_APP === "money" ? "" : `<a href="status.html">${ICO.pulse}<span>สถานะระบบ</span></a>`}
+        ${window.JK_APP === "money" ? `<button type="button" data-go="stat">${ICO.pulse}<span>สถานะระบบและโควตา</span></button>` : `<a href="status.html">${ICO.pulse}<span>สถานะระบบ</span></a>`}
       </div>`;
   }
   function uiOpen() {
@@ -155,6 +155,7 @@ if (window.JK_APP === 'money') {
         }
         if (e.target.closest('[data-go="photo"]')) { pickPhoto().then(() => uiPaint(dlg)); return; }
         if (e.target.closest('[data-go="conn"]')) { dlg.close(); document.getElementById('btnSettings').click(); }
+        if (e.target.closest('[data-go="stat"]')) { dlg.close(); hubStatus(); }
       });
     }
     uiPaint(dlg); dlg.showModal();
@@ -435,3 +436,42 @@ if (window.JK_APP === 'money') {
   const ask = () => { if (window.JK_NOKEY && !/hk\.html/.test(location.pathname)) window.hubConnect(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ask); else ask();
 }
+
+/* ===================== 📊 สถานะระบบและโควตา (แอปเงิน) =====================
+ * หลังบ้าน status (statusInfo_ + statusQuota_) · บอกแค่ตัวเลข/ตั้งแล้วหรือยัง ไม่ส่งค่าลับ */
+function hubStatus() {
+  let d = document.getElementById('stDlg');
+  if (!d) { d = document.createElement('dialog'); d.id = 'stDlg'; d.className = 'ui-dlg st-dlg'; document.body.appendChild(d); d.addEventListener('click', e => { if (e.target === d || e.target.closest('[data-x]')) d.close(); }); }
+  d.innerHTML = '<div class="st-in"><h2>สถานะระบบและโควตา</h2><p class="st-mute">กำลังโหลด…</p></div>';
+  if (!d.open) d.showModal();
+  const esc2 = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const n = v => Number(v || 0).toLocaleString('th-TH');
+  const gb = v => (v / 1073741824).toLocaleString('th-TH', { maximumFractionDigits: v > 1073741824 * 10 ? 0 : 1 }) + ' GB';
+  const bar = (label, used, limit, txt, note) => {
+    const pct = limit ? Math.min(100, Math.round(used * 100 / limit)) : 0, lv = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : '';
+    return `<div class="st-row"><div class="st-top"><span>${label}</span><b class="${lv}">${txt}</b></div>${limit ? `<div class="st-bar ${lv}"><i style="width:${Math.max(pct, used ? 2 : 0)}%"></i></div>` : ''}${note ? `<div class="st-mute">${note}</div>` : ''}</div>`;
+  };
+  const when = s => { if (!s) return 'ยังไม่เคย'; const t = new Date(String(s).replace(' ', 'T')); if (isNaN(t)) return esc2(s); const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'เมื่อกี้' : m < 60 ? m + ' นาทีที่แล้ว' : m < 1440 ? Math.round(m / 60) + ' ชม.ที่แล้ว' : Math.round(m / 1440) + ' วันที่แล้ว'; };
+  api('status').then(s => {
+    const q = (s.line || {}).quota, ai = s.ai || {}, h = ai.health || {}, g = s.groups || {}, dr = s.drive;
+    const rows = Object.entries(s.rows || {}).filter(([k]) => /^(Money|Owe|Group|HkUsers|Vault2|AiSamples)$/.test(k)).map(([k, v]) => k + ' ' + n(v)).join(' · ');
+    const tick = s.lastTick ? (Date.now() - new Date(String(s.lastTick).replace(' ', 'T')) > 3600e3 ? 'bad' : '') : 'bad';
+    d.innerHTML = `<div class="st-in"><div class="st-head"><h2>สถานะระบบและโควตา</h2><button type="button" class="st-x" data-x aria-label="ปิด">✕</button></div>
+      <h3>LINE</h3>
+      ${q ? bar('ข้อความที่ส่งเอง เดือนนี้', q.used, q.limit, q.limit ? n(q.used) + ' / ' + n(q.limit) : n(q.used) + ' (ไม่จำกัด)', 'นับการ์ดเตือน สรุปเช้า บิลประจำเดือน · ข้อความตอบกลับในแชทไม่นับ') : `<div class="st-row"><div class="st-top"><span>โควตาข้อความ</span><b class="bad">ดูไม่ได้</b></div><div class="st-mute">เช็ก LINE_TOKEN ใน Script Properties</div></div>`}
+      ${g.all != null ? `<div class="st-row"><div class="st-top"><span>กลุ่มที่เปิดหาร</span><b>${n(g.on)} กลุ่ม</b></div><div class="st-mute">บิลเปิดอยู่ ${n(g.open)} · กองกลางเปิด ${n(g.pools)} · บิลประจำเดือน ${n(g.recs)}</div></div>` : ''}
+      <h3>AI อ่านใบเสร็จ (Gemini)</h3>
+      <div class="st-row"><div class="st-top"><span>วันนี้</span><b class="${h.fail >= 3 ? 'bad' : ''}">สำเร็จ ${n(h.ok)} · ไม่ตอบ ${n(h.fail)}</b></div><div class="st-mute">${ai.key ? 'ตั้ง key แล้ว' : '<b class="bad">ยังไม่ได้ตั้ง GEMINI_API_KEY</b>'} · ใช้รุ่น ${esc2(h.use || ai.model || '-')}${h.switched ? ' (สลับไปรุ่นสำรอง)' : ''} · เว็บในกลุ่มจำกัดคนละ 30 รูป/วัน</div></div>
+      <h3>Google</h3>
+      ${dr ? bar('พื้นที่ Drive (รูปสลิป/ใบเสร็จ)', dr.used, dr.limit, gb(dr.used) + (dr.limit ? ' / ' + gb(dr.limit) : '')) : ''}
+      ${s.cells ? bar('ขนาดชีตข้อมูล', s.cells, 10000000, n(s.cells) + ' / 10 ล้านช่อง', esc2(rows)) : ''}
+      ${s.props != null ? bar('ที่เก็บตั้งค่า (Script Properties)', s.props, 500000, n(s.props) + ' / 500,000 ตัวอักษร') : ''}
+      ${s.groupsCfg != null ? bar('ตั้งค่ากลุ่ม LINE', s.groupsCfg, 9000, n(s.groupsCfg) + ' / 9,000', 'เก็บรายชื่อคนในกลุ่มละไม่เกิน 40 คน') : ''}
+      <h3>รอบทำงาน</h3>
+      <div class="st-row"><div class="st-top"><span>รอบเตือน (ทุก 15 นาที)</span><b class="${tick}">${when(s.lastTick)}</b></div><div class="st-mute">ตัวตั้งเวลา: ${esc2((s.triggers || []).join(', ') || 'ไม่มี')} · Apps Script ให้ตัวตั้งเวลารันรวมวันละ 90 นาที</div></div>
+      <div class="st-row"><div class="st-top"><span>สำรองชีตล่าสุด</span><b>${esc2(s.backup || 'ยังไม่เคย')}</b></div></div>
+      <p class="st-mute">หลังบ้านเวอร์ชัน ${esc2(s.ver)} · ${esc2(s.account || '')} · ข้อมูล ${esc2(s.now || '')}</p></div>`;
+  }).catch(e => { d.innerHTML = `<div class="st-in"><div class="st-head"><h2>สถานะระบบและโควตา</h2><button type="button" class="st-x" data-x aria-label="ปิด">✕</button></div><p class="st-mute">โหลดไม่ได้: ${esc2(e.message)}</p></div>`; });
+}
+window.hubStatus = hubStatus;
+
