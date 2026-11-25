@@ -27,6 +27,8 @@ const HKU_HEADERS = ['uid', 'name', 'nick', 'pp', 'qr', 'qrFile', 'updated', 'ba
 const HK_BANKS = { kbank: 'กสิกรไทย', scb: 'ไทยพาณิชย์', bbl: 'กรุงเทพ', ktb: 'กรุงไทย', bay: 'กรุงศรีอยุธยา', ttb: 'ทหารไทยธนชาต', gsb: 'ออมสิน', baac: 'ธ.ก.ส.', ghb: 'อาคารสงเคราะห์', uob: 'ยูโอบี', cimb: 'ซีไอเอ็มบี', kkp: 'เกียรตินาคินภัทร', lhb: 'แลนด์ แอนด์ เฮ้าส์', tisco: 'ทิสโก้', icbc: 'ไอซีบีซี', other: 'อื่นๆ' };
 const HK_WEB = 'https://nitithon-web.github.io/maewkwak/';   // แอปเล็ก + รูปมาสคอต อยู่รีโปแมวกวัก
 const HK_FOLDER = 'แมวกวัก - หารกลุ่ม';
+// 🏷 หมวดของบิลในเว็บ (แอปเล็ก) → หมวดรายจ่ายส่วนของเจ้าของ · ตรงกับ SCATS ในแอป
+const HK_CAT_MONEY = { food: 'อาหาร', mart: 'อาหาร', sport: 'ออกกำลังกาย', karaoke: 'บันเทิง/ท่องเที่ยว', drink: 'เครื่องดื่ม/กาแฟ', ride: 'เดินทาง', trip: 'บันเทิง/ท่องเที่ยว', movie: 'บันเทิง/ท่องเที่ยว', home: 'ค่าน้ำไฟ/โทรศัพท์', gift: 'อื่นๆ' };
 const GRP_CMD = /^(แมวกวัก|น้องแมว|หาร|หารกัน|ค้าง|ใครค้าง|ใครยังไม่จ่าย|ยังไม่จ่าย|ทวง|#ทวง|ทวงหน่อย|จ่ายแล้ว|โอนแล้ว|ลบบิล|ยกเลิกบิล|พร้อมเพย์|พร้อมเพ|ชื่อ|วิธีใช้|ช่วย|help|เตือนทุกวัน|เปิดหาร|ปิดหาร)/i;
 
 const GRP_HELP = [
@@ -594,12 +596,12 @@ function grpOweCreate_(b) {
     const people = ['ฉัน'].concat([...new Set(list.map(d => d.person))]);
     const shares = { 'ฉัน': selfS / 100 };
     list.forEach(d => { shares[d.person] = Math.round(((shares[d.person] || 0) + d.amount) * 100) / 100; });
-    const sp = { id: sid, kind: 'split', title: b.title, date: date, people: people, total: b.totalS / 100, via: 'line-group', gbill: b.id,
+    const sp = { id: sid, kind: 'split', title: b.title, cat: b.cat || '', date: date, people: people, total: b.totalS / 100, via: 'line-group', gbill: b.id,
       bills: [{ id: oweId_(), title: '', payer: 'ฉัน', method: 'custom', total: String(b.totalS / 100), who: people.slice(), custom: shares, items: [], svc: false, vat: false, disc: '', shares: shares, sum: b.totalS / 100 }],
       transfers: list.map(d => ({ from: d.person, to: 'ฉัน', amount: d.amount, done: false })) };
     let mid = '';
     if (selfS) {
-      const mm = moneySave_({ type: 'out', date: date, amount: selfS / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน' + (selfNote.length ? ' + จ่ายแทน' + selfNote.join(', ') : ''), cat: moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
+      const mm = moneySave_({ type: 'out', date: date, amount: selfS / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน' + (selfNote.length ? ' + จ่ายแทน' + selfNote.join(', ') : ''), cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
       mid = mm.id; sp.moneyId = mid;
     }
     oweSave_([sp].concat(list));
@@ -609,7 +611,7 @@ function grpOweCreate_(b) {
   if (!mine.length) return null;
   const amt = grpSum_(mine);
   const d = { id: oweId_(), kind: 'debt', person: owePerson_(b.payer.name, docs), dir: 'me', amount: amt / 100, date: date, title: b.title, gbill: b.id, payments: [], status: 'open', created: date };
-  const mm = moneySave_({ type: 'out', date: date, amount: amt / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน (' + b.payer.name + ' จ่ายก่อน)', cat: moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
+  const mm = moneySave_({ type: 'out', date: date, amount: amt / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน (' + b.payer.name + ' จ่ายก่อน)', cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
   d.moneyId = mm.id;
   oweSave_([d]);
   const debts = {};
@@ -713,9 +715,11 @@ function hkApi_(body) {
       case 'hk_edit':   return hkCreate_(me, grp, body, hkGet_(body.b, grp));
       case 'hk_paid':   return hkPaid_(me, hkGet_(body.b, grp), body);
       case 'hk_ok':     return hkOk_(me, hkGet_(body.b, grp), body);
+      case 'hk_units':  return hkUnits_(me, hkGet_(body.b, grp), body);
       case 'hk_void':   { const b = hkGet_(body.b, grp); if (b.payer.uid !== me.uid) throw new Error('ลบได้เฉพาะคนจ่ายก่อน'); hkVoidBill_(b); return { done: true }; }
       case 'hk_slip':   return hkSlipGet_(me, hkGet_(body.b, grp), String(body.k || ''));
       case 'hk_qrimg':  return hkQrImg_(me, hkGet_(body.b, grp));
+      case 'hk_rcptimg': return hkRcptImg_(me, hkGet_(body.b, grp));
       case 'hk_me_set': return { me: hkMeSet_(me, body, grp) };
       case 'hk_card':   { const b = hkGet_(body.b, grp); if (b.payer.uid !== me.uid) throw new Error('เฉพาะคนจ่ายก่อน'); return { msg: hkCardFlex_(b, 'บิล') }; }
       default: throw new Error('unknown action');
@@ -737,7 +741,8 @@ function hkView_(b, me) {
   if (!isPayer && !mine.length) throw new Error('คุณไม่ได้อยู่ในบิลนี้');
   const g = grpCfg_()[b.gid] || {};
   const row = m => ({ k: m.k, uid: m.uid || '', name: m.name, out: !!m.out, by: m.by ? m.by.name : '', byUid: m.by ? m.by.uid : '', byMe: !!(m.by && m.by.uid === me.uid), amtS: m.amtS, units: m.units || 0, items: m.items || [], st: m.st, at: m.at || '', slip: !!m.slip, auto: !!m.auto, via: m.via || '' });
-  const v = { id: b.id, title: b.title, date: b.date, mode: b.mode || 'equal', unit: b.unit || 'ชม.', status: b.status, group: g.name || '', payer: b.payer.name, isPayer: isPayer, created: b.created, totalS: b.totalS };
+  const v = { id: b.id, title: b.title, date: b.date, mode: b.mode || 'equal', unit: b.unit || 'ชม.', status: b.status, group: g.name || '', payer: b.payer.name, isPayer: isPayer, created: b.created, totalS: b.totalS,
+    cat: b.cat || '', rcpt: !!b.rcpt, selfUnits: !!b.selfUnits, canUnits: hkUnitsOpen_(b) && !isPayer && mine.some(m => !m.by) };
   if (isPayer) {
     Object.assign(v, { payerIn: b.payerIn !== false, payerShareS: b.payer.shareS || 0, payerUnits: b.payer.units || 0, payerItems: b.payer.items || [], rows: b.members.map(row), items: b.items || [] });
   } else {
@@ -880,11 +885,14 @@ function hkCreate_(me, grp, p, old) {
   const sum = shareS + grpSum_(members);
   if (sum !== totalS) throw new Error('ยอดของทุกคนรวมกัน (' + grpB_(sum) + ') ไม่ตรงยอดบิล ' + grpB_(totalS));
   const items = (Array.isArray(p.items) ? p.items : []).slice(0, 60).map(it => ({ name: String(it.name || '').slice(0, 60), priceS: Math.round(Number(it.priceS) || 0), who: (it.who || []).map(String).slice(0, 40) })).filter(it => it.name);
+  const newRc = /^[\w-]{20,}$/.test(String(p.rcpt || '')) && CacheService.getScriptCache().get('hkrc:' + p.rcpt) === me.uid ? String(p.rcpt) : '';
+  const rcpt = newRc || (old && p.keepRcpt ? old.rcpt || '' : '');
+  const cat = Object.prototype.hasOwnProperty.call(HK_CAT_MONEY, String(p.cat || '')) ? String(p.cat) : '';
   const b = old || { id: Utilities.getUuid().replace(/-/g, ''), gid: gid, token: grpTok_(), v: 2, via: 'app', created: stamp_(), status: 'open' };
   if (old) { try { grpOweVoid_(b); } catch (e) {} }
   Object.assign(b, {
     title: String(p.title || '').trim().slice(0, 60) || 'หารกัน', date: /^\d{4}-\d{2}-\d{2}$/.test(String(p.date || '')) ? p.date : (old ? old.date : todayStr_()),
-    totalS: totalS, mode: mode, unit: String(p.unit || 'ชม.').slice(0, 10), items: items, payerIn: payerIn,
+    totalS: totalS, mode: mode, unit: String(p.unit || 'ชม.').slice(0, 10), items: items, payerIn: payerIn, selfUnits: mode === 'hours' && !!p.selfUnits, cat: cat, rcpt: rcpt,
     payer: { uid: me.uid, name: me.disp, shareS: shareS, units: Number(p.payerUnits) || 0, items: (p.payerItems || []).map(String).slice(0, 30) },
     members: members, edited: old ? stamp_() : '',
   });
@@ -892,6 +900,36 @@ function hkCreate_(me, grp, p, old) {
   try { b.owe = grpOweCreate_(b); } catch (e) { console.warn('grpOwe: ' + e); }
   grpSave_(b);
   return { bill: hkView_(b, me), msg: hkCardFlex_(b, old ? 'แก้บิล' : 'บิลใหม่') };
+}
+
+/** ⏱ บิลตามชั่วโมงที่เปิดให้แต่ละคนแก้ชั่วโมงของตัวเอง: ได้จนกว่าจะมีคนแจ้งจ่าย (แถวที่คนจ่ายก่อนจ่ายแทนไม่นับ) */
+function hkUnitsOpen_(b) {
+  if (!b || b.mode !== 'hours' || !b.selfUnits || b.status !== 'open') return false;
+  return !b.members.some(m => m.st !== 'wait' && !(m.by && m.by.uid === b.payer.uid));
+}
+/** คำนวณยอดตามชั่วโมงใหม่ทั้งบิล (แบบเดียวกับแอป: เพื่อนปัดลงเป็นบาท เศษอยู่กับคนจ่ายก่อน) แล้วตั้งค้างกันใหม่ */
+function hkUnitsRecalc_(b) {
+  const list = b.members.slice(), payer = b.payerIn !== false ? { amtS: 0, units: Number(b.payer.units) || 0 } : null;
+  if (payer) list.push(payer);
+  hkSpread_(b.totalS, list, payer, x => Number(x.units) || 0);
+  if (payer) b.payer.shareS = payer.amtS;
+  if (b.members.some(m => m.amtS <= 0)) throw new Error('ยอดของบางคนเป็น 0 ลองเพิ่มชั่วโมง');
+  if (b.owe) { try { grpOweVoid_(b); } catch (e) {} }
+  try { b.owe = grpOweCreate_(b); } catch (e) { console.warn('grpOwe: ' + e); }
+}
+function hkUnits_(me, b, p) {
+  if (b.payer.uid === me.uid) throw new Error('คุณเป็นคนจ่ายก่อน แก้ชั่วโมงของทุกคนได้ที่ แก้บิล');
+  if (!hkUnitsOpen_(b)) throw new Error(b.selfUnits ? 'มีคนแจ้งจ่ายแล้ว แก้ชั่วโมงไม่ได้ บอก ' + b.payer.name + ' ให้แก้บิลแทน' : 'บิลนี้ไม่ได้เปิดให้แก้ชั่วโมงเอง');
+  const u = Math.round((Number(p.units) || 0) * 2) / 2;
+  if (u < 0.5 || u > 24) throw new Error('ชั่วโมงต้องอยู่ระหว่าง 0.5 ถึง 24');
+  const m = b.members.find(x => x.uid === me.uid && !x.by);
+  if (!m) throw new Error('คุณไม่ได้อยู่ในบิลนี้');
+  if (Number(m.units) === u) return { bill: hkView_(b, me) };
+  m.units = u;
+  hkUnitsRecalc_(b);
+  b.edited = stamp_();
+  grpSave_(b);
+  return { bill: hkView_(b, me) };
 }
 
 /** คนที่ต้องจ่ายกด "ฉันจ่ายแล้ว" · via: transfer (+ สลิป: ยอดตรง/วันที่ใหม่/ไม่เคยใช้ = ยืนยันให้เลย) | cash (รอคนจ่ายก่อนยืนยันว่าได้รับ) */
@@ -928,6 +966,11 @@ function hkSlipGet_(me, b, k) {
   if (!m) throw new Error('ไม่มีสลิป');
   return { data: Utilities.base64Encode(DriveApp.getFileById(m.slip).getBlob().getBytes()) };
 }
+function hkRcptImg_(me, b) {
+  if (b.payer.uid !== me.uid && !grpMine_(b, me.uid, '').length) throw new Error('คุณไม่ได้อยู่ในบิลนี้');
+  if (!b.rcpt) throw new Error('บิลนี้ไม่มีรูปใบเสร็จ');
+  return { data: Utilities.base64Encode(DriveApp.getFileById(b.rcpt).getBlob().getBytes()) };
+}
 function hkQrImg_(me, b) {
   if (b.payer.uid !== me.uid && !grpMine_(b, me.uid, '').length) throw new Error('คุณไม่ได้อยู่ในบิลนี้');
   const f = hkUser_(b.payer.uid).qrFile;
@@ -943,9 +986,15 @@ function hkRead_(me, p) {
   cache.put(ck, String(n + 1), 86400);
   const bytes = Utilities.base64Decode(String(p.data || ''));
   if (bytes.length > 4 * 1024 * 1024) throw new Error('รูปใหญ่เกินไป');
+  let rcpt = '';
+  if (p.keep) {   // 🧾 เก็บรูปไว้ให้คนในบิลดู (ผูกกับบิลตอนกดส่ง · ใช้ได้เฉพาะคนที่อัป 6 ชม.)
+    const f = hkFolder_('ใบเสร็จ').createFile(Utilities.newBlob(bytes, 'image/jpeg', todayStr_() + '_' + me.uid.slice(-6) + '.jpg'));
+    rcpt = f.getId();
+    cache.put('hkrc:' + rcpt, me.uid, 21600);
+  }
   const o = aiRead_(Utilities.newBlob(bytes, 'image/jpeg', 'receipt.jpg'), { cats: [], multi: 3 });
-  if (!o) throw new Error('ตอนนี้อ่านใบเสร็จไม่ได้ ใส่ยอดเองได้เลย');
-  return { amount: Number(o.amount) || 0, vendor: o.vendor || '', items: (o.items || []).map(it => ({ name: it.name, price: Math.round((it.price - (it.disc || 0)) * 100) / 100, qty: it.qty, cut: it.disc || 0 })), service: o.service || 0, discount: o.discount || 0, check: o.check ? { ok: o.check.ok, diff: o.check.diff } : null };
+  if (!o) { if (rcpt) return { ok2: false, rcpt: rcpt }; throw new Error('ตอนนี้อ่านใบเสร็จไม่ได้ ใส่ยอดเองได้เลย'); }
+  return { ok2: true, rcpt: rcpt, amount: Number(o.amount) || 0, vendor: o.vendor || '', items: (o.items || []).map(it => ({ name: it.name, price: Math.round((it.price - (it.disc || 0)) * 100) / 100, qty: it.qty, cut: it.disc || 0 })), service: o.service || 0, discount: o.discount || 0, check: o.check ? { ok: o.check.ok, diff: o.check.diff } : null };
 }
 
 
