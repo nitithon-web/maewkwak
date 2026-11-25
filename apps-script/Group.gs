@@ -285,8 +285,9 @@ function grpHandle_(ev) {
   const text = ev.message.type === 'text' ? String(ev.message.text || '').trim() : '';
   const tagBot = ((ev.message.mention || {}).mentionees || []).some(m => m.isSelf);
 
-  // เปิดใช้ในกลุ่ม: เจ้าของพิมพ์ เปิดหาร (หรือ แมวกวัก ในกลุ่มที่ยังไม่เปิด)
-  if (/^เปิดหาร$/.test(text) || (/^แมวกวัก$/.test(text) && uid === owner && !(g && g.on))) {
+  // เปิดใช้ในกลุ่ม: เจ้าของพิมพ์ เปิดหาร · หรือเจ้าของเรียก แมวกวัก / หาร / แท็กบอท ในกลุ่มที่ยังไม่เปิด
+  const calling = tagBot || /^(แมวกวัก|น้องแมว|หาร|หารกัน|วิธีใช้|ช่วย)$/.test(text) || /^หาร\s/.test(text);
+  if (/^เปิดหาร$/.test(text) || (calling && uid === owner && !(g && g.on))) {
     if (uid !== owner) return reply_(ev.replyToken, 'เฉพาะเจ้าของบอทเปิดใช้ในกลุ่มได้ครับ');
     const nm = src.groupId ? grpSummary_(gid) : '';
     cfg[gid] = Object.assign({ seen: {}, daily: false, tok: grpTok_() }, g || {}, { on: true, type: src.type, name: nm || (g && g.name) || '' });
@@ -295,7 +296,10 @@ function grpHandle_(ev) {
     grpCfgSave_(cfg);
     return grpReplyMsgs_(ev.replyToken, [grpText_('✅ เปิดหารกันในกลุ่มนี้แล้ว\nทุกคนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดสักครั้ง ชื่อจะขึ้นให้เลือกตอนหาร\nส่งรูปสลิปในกลุ่มได้เลย แมวกวักตรวจแล้วติ๊กจ่ายให้เอง\nบอทไม่เก็บข้อความแชท'), hkSummonFlex_(gid)]);
   }
-  if (!g || !g.on) return;   // กลุ่มที่ยังไม่เปิด เงียบ
+  if (!g || !g.on) {   // กลุ่มที่ยังไม่เปิด: คุยกันทั่วไป = เงียบ · มีคนเรียกบอท = บอกวิธีเปิด
+    if (calling) reply_(ev.replyToken, '🐱 แมวกวักยังไม่ได้เปิดในกลุ่มนี้\nให้เจ้าของบอทพิมพ์ เปิดหาร ในกลุ่มนี้ก่อนนะครับ');
+    return;
+  }
 
   // จำว่าใครอยู่ในกลุ่ม (userId + ชื่อ ไม่เก็บข้อความ) ไว้ให้เลือกตอนหาร
   if (uid && !(g.seen || {})[uid]) {
