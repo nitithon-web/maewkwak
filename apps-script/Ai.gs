@@ -54,6 +54,11 @@ function aiRead_(file, ctx) {
     '- ซื้อ 1 แถม 1 / ซื้อคู่ถูกกว่า: ใส่สินค้าตามจำนวนจริงและราคาเต็ม แล้วใส่ส่วนที่ลดเป็น items[].discount ของสินค้านั้น',
     '- discounts: ทุกบรรทัดส่วนลด/โปร/คูปองในใบเสร็จ บรรทัดละ 1 รายการ · name = ชื่อส่วนลดตามที่พิมพ์ทุกตัวอักษร (ไม่มีชื่อให้ "ส่วนลด") · amount = ยอดลดเป็นบวก · item = ชื่อสินค้าใน items ที่ส่วนลดนี้ลดให้ (คัดลอกชื่อให้ตรงกับ items[].name ทุกตัวอักษร)',
     '- หา item ของส่วนลดให้ได้ทุกครั้งที่ทำได้: บรรทัดส่วนลดที่อยู่ใต้สินค้า · ชื่อส่วนลดมีชื่อ/รหัส/ยี่ห้อสินค้า · โปรซื้อหลายชิ้นลด (เช่น 3 ห่อ 89) ให้ลดสินค้านั้น · ยอดลดเท่ากับส่วนต่างราคาโปรของสินค้าใด · เว้น item ว่างเฉพาะส่วนลดที่ใช้กับทั้งบิลจริงๆ (คูปองท้ายบิล ส่วนลดสมาชิก/แต้ม % ทั้งบิล ส่วนลดค่าส่ง)',
+    '- discounts[].kind แยกประเภทให้ถูก (สำคัญมาก เพราะใช้หารเงินระหว่างเพื่อน):',
+    '  item = ลดสินค้าชิ้นเดียว: คูปอง/แลกคะแนนลดสินค้าที่ระบุชื่อ (เช่น "คูปองชีสไบท์Line", "AMBลด…", "7ลด…"), ราคาพิเศษ/ลดราคาสินค้านั้น, ซื้อหลายชิ้นของสินค้าเดียวกันลด (3 ห่อ 89), 1 แถม 1 → ใส่ item',
+    '  combo = โปรจับคู่/เป็นชุดหลายสินค้า: Meal Deal / 7Meal Deal / เซเว่นมีลดีล (ข้าวกล่องหรือขนม + เครื่องดื่ม จัดเซ็ต), ซื้อ A คู่ B, ชิ้นที่ 2 ราคาพิเศษเมื่อเป็นคนละรายการ, เซ็ต/คอมโบ → ใส่ items = ชื่อสินค้าทุกชิ้นที่น่าจะร่วมโปร (Meal Deal = อาหารพร้อมทาน/ข้าว + เครื่องดื่มในบิล)',
+    '  bill = ลดทั้งบิลจริงๆ: คูปองท้ายบิล/คูปองเงินสดเมื่อซื้อครบยอด, ส่วนลดสมาชิก/บัตร % ทั้งบิล, โค้ดส่วนลดธนาคาร/แอป, ส่วนลดค่าส่ง → item ว่าง',
+    '  pay = ไม่ใช่ส่วนลด แต่เป็นการจ่ายด้วยของที่มีค่าเหมือนเงิน: เหรียญ ALL member, ใช้คะแนน/แต้มแทนเงินสด, แต้มบัตรเครดิต (KTC FOREVER ฯลฯ), บัตรกำนัล/Gift voucher, เงินในบัตร → item ว่าง (บรรทัดพวกนี้มักอยู่ใต้ยอดสุทธิในส่วนการชำระเงิน)',
     '- บรรทัดราคา 0.00 (ของแถม แสตมป์ แต้มสะสม กิจกรรม ข้อความโปร) และบรรทัดยอดรวม/เงินที่รับ/เงินทอน/VAT ไม่ต้องใส่ใน items',
     '- แอปส่งอาหาร (Grab, LINE MAN, foodpanda, Robinhood, ShopeeFood): items = เมนู · ค่าส่ง+ค่าบริการแพลตฟอร์ม+ค่ากล่อง รวมกันเป็น service_charge · โปร/ส่วนลดค่าส่ง/โค้ด = discount',
     '- ร้านอาหารที่บวก service charge 10% และ/หรือ VAT 7% ท้ายบิล: ราคาเมนูยังไม่รวม → prices_include_vat=false และใส่ vat_amount, service_charge ตามที่พิมพ์',
@@ -72,7 +77,7 @@ function aiRead_(file, ctx) {
       date: S('STRING'), time: S('STRING'), amount: S('NUMBER'), vendor: S('STRING'), desc: S('STRING'),
       vat: S('STRING', { enum: ['yes', 'no', 'unknown'] }), vat_amount: S('NUMBER'), prices_include_vat: S('BOOLEAN'),
       service_charge: S('NUMBER'), discount: S('NUMBER'),
-      discounts: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), amount: S('NUMBER'), item: S('STRING') }, required: ['name', 'amount'] }) }),
+      discounts: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), amount: S('NUMBER'), kind: S('STRING', { enum: ['item', 'combo', 'bill', 'pay'] }), item: S('STRING'), items: S('ARRAY', { items: S('STRING') }) }, required: ['name', 'amount', 'kind'] }) }),
       items: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), qty: S('NUMBER'), price: S('NUMBER'), discount: S('NUMBER'), discount_note: S('STRING') }, required: ['name', 'price'] }) }),
       pay: S('STRING'), memo: S('STRING'), payer: S('STRING'), payee: S('STRING'), bank: S('STRING'), ref: S('STRING'), tax_id: S('STRING'),
       cat: S('STRING'), confidence: S('NUMBER'),
@@ -119,10 +124,15 @@ function aiMulti_(model, body, key, cats, ctx) {
   const think = ctx.think === undefined ? 'low' : ctx.think;
   const req = JSON.parse(JSON.stringify(body));
   if (think && /^gemini-[3-9]/.test(model)) req.generationConfig.thinkingConfig = { thinkingLevel: think };
-  const one = { url: 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', method: 'post', contentType: 'application/json',
-    payload: JSON.stringify(req), headers: { 'x-goog-api-key': key }, muteHttpExceptions: true };
+  // อุณหภูมิต่างกันในแต่ละรอบ (0 เหมือนกันหมด = ผลซ้ำกัน ถ้าพลาดก็พลาดทุกรอบ)
+  const temps = [0, 0.5, 0.9, 0.7];
+  const reqs = Array.from({ length: n }, (_, i) => {
+    req.generationConfig.temperature = temps[i];
+    return { url: 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', method: 'post', contentType: 'application/json',
+      payload: JSON.stringify(req), headers: { 'x-goog-api-key': key }, muteHttpExceptions: true };
+  });
   let rs;
-  try { rs = UrlFetchApp.fetchAll(Array.from({ length: n }, () => one)); } catch (e) { AI_ERRS.push(model + ' multi: ' + e); return null; }
+  try { rs = UrlFetchApp.fetchAll(reqs); } catch (e) { AI_ERRS.push(model + ' multi: ' + e); return null; }
   const outs = [];
   rs.forEach(r => {
     const code = r.getResponseCode();
@@ -254,15 +264,30 @@ function aiNormalize_(j, cats, model) {
   const addDisc = (t, name, a) => { t.disc = r2(t.disc + a); t.discs.push({ n: name, a: a }); };
   // แบบที่ 1: ส่วนลดเป็นรายการ (ชื่อ ยอด ลดให้สินค้าไหน) — ใช้เป็นหลักเมื่อ AI ส่งมา
   const fromList = () => {
-    const its = baseItems(), bill = [];
+    const its = baseItems(), bill = [], pay = [];
     (Array.isArray(j.discounts) ? j.discounts : []).forEach(d => {
       const a = r2(Math.abs(num(d.amount))), name = String(d.name || 'ส่วนลด').trim().slice(0, 40) || 'ส่วนลด';
       if (!a) return;
-      const key = String(d.item || '').trim();
-      const t = (key && (its.find(x => x.name === key) || aiDiscTarget_(key, its))) || aiDiscTarget_(name, its);
+      if (d.kind === 'pay') { pay.push({ n: name, a: a }); return; }   // เหรียญ/แต้มแทนเงินสด = เงินของคนจ่าย ไม่ใช่ส่วนลด
+      const find = k => { k = String(k || '').trim(); return k ? its.find(x => x.name === k) || aiDiscTarget_(k, its) : null; };
+      // โปรจับคู่: แบ่งส่วนลดให้สินค้าที่ร่วมโปรตามสัดส่วนราคา
+      const group = Array.from(new Set((Array.isArray(d.items) ? d.items : []).map(find).filter(Boolean)));
+      if (group.length >= 2) {
+        const tot = group.reduce((s, t) => s + t.price - t.disc, 0);
+        if (tot >= a) {
+          let left = Math.round(a * 100);
+          group.forEach((t, i) => {
+            const part = i === group.length - 1 ? left : Math.round(a * 100 * (t.price - t.disc) / tot);
+            left -= part;
+            if (part) addDisc(t, name, part / 100);
+          });
+          return;
+        }
+      }
+      const t = find(d.item) || (group.length === 1 ? group[0] : null) || aiDiscTarget_(name, its);
       if (t && t.disc + a <= t.price + 0.001) addDisc(t, name, a); else bill.push({ n: name, a: a });
     });
-    return { items: its, bill: bill };
+    return { items: its, bill: bill, pay: pay };
   };
   // แบบที่ 2 (เดิม): items[].discount + บรรทัดส่วนลดที่แยกมา + discount ท้ายบิล
   const fromItems = () => {
@@ -287,24 +312,31 @@ function aiNormalize_(j, cats, model) {
     if (extra && bd && Math.abs(bd - extra) < 0.5) bd = 0;
     if (itemDisc && bd && Math.abs(bd - itemDisc) < 0.5) bd = 0;
     if (bd) bill.push({ n: 'ส่วนลดท้ายบิล', a: r2(bd) });
-    return { items: its, bill: bill };
+    return { items: its, bill: bill, pay: [] };
   };
   const service = n(j.service_charge), incVat = j.prices_include_vat !== false;
   const vatAdd = incVat ? 0 : n(j.vat_amount);   // ใช้เฉพาะยอด VAT ที่พิมพ์จริง ไม่ใช้ค่าประมาณ
   const netOf = o => r2(o.items.reduce((s, it) => s + it.price - it.disc, 0) - o.bill.reduce((s, d) => s + d.a, 0) + service + vatAdd);
+  const gap = o => { const n = netOf(o), p = o.pay.reduce((s, d) => s + d.a, 0); return Math.min(Math.abs(n - amount), Math.abs(n - p - amount)); };
   const B = fromItems(), L = Array.isArray(j.discounts) && j.discounts.length ? fromList() : null;
   // เลือกแบบที่รวมแล้วตรงยอดจ่าย (เท่ากัน = แบบรายการ เพราะรู้ว่าส่วนลดไหนลดเมนูไหน)
-  const pickL = L && (!amount || Math.abs(netOf(L) - amount) <= Math.abs(netOf(B) - amount) + 0.01);
+  // ยอดที่ AI ให้มาเท่ายอดก่อนลด (แบบ 7-Eleven) → เทียบยอดไม่ได้ (แบบที่ขาดส่วนลดจะดูใกล้กว่า) ให้ใช้แบบรายการ
+  const grossAll = r2(B.items.reduce((s, it) => s + it.price, 0) + service + vatAdd);
+  const amtIsGross = amount && Math.abs(amount - grossAll) < 0.5;
+  const pickL = L && (!amount || amtIsGross || gap(L) <= gap(B) + 0.01);
   const D = pickL ? L : B;
   const items = D.items.map(it => ({ name: it.name, qty: it.qty, price: it.price, disc: it.disc, discs: it.discs, discNote: it.discs.map(d => d.n).join(', ').slice(0, 60) }));
-  const discList = D.bill;
+  const discList = D.bill, payList = D.pay;
+  const paid = r2(payList.reduce((s, d) => s + d.a, 0));
   const itemDisc = items.reduce((s, it) => s + it.disc, 0);
   const billDisc = r2(discList.reduce((s, d) => s + d.a, 0));
   // ✅ ตรวจตัวเลข: (ราคา − ส่วนลด) ของทุกรายการ − ส่วนลดท้ายบิล + ค่าบริการ (+ VAT ถ้าราคายังไม่รวม) ต้องเท่ายอดจ่าย
   const gross = items.reduce((s, it) => s + it.price, 0);
   let amt = amount, check = null, fixed = '';
   if (items.length && kind !== 'slip') {
-    const expect = r2(gross - itemDisc - billDisc + service + vatAdd);
+    const expect = r2(gross - itemDisc - billDisc + service + vatAdd);   // ยอดบิลที่ต้องหาร (ก่อนหักเหรียญ/แต้มที่คนจ่ายใช้จ่าย)
+    // AI ให้ยอดเงินสดที่เหลือหลังใช้เหรียญ/แต้ม → ยอดบิล = เงินสด + เหรียญ/แต้ม
+    if (paid && amt && Math.abs(amt + paid - expect) < 0.5) { amt = expect; fixed = 'รวมเหรียญ/แต้มที่ใช้จ่ายแล้ว'; }
     // ยอดที่ AI ให้มาเท่ากับยอดก่อนหักส่วนลดพอดี (แบบ 7-Eleven) → ใช้ยอดหลังหักส่วนลด
     if (amt && (itemDisc + billDisc) > 0 && Math.abs(amt - r2(gross + service + vatAdd)) < 0.5 && expect > 0) { amt = expect; fixed = 'ยอดก่อนลด → ยอดหลังลด'; }
     if (!amt && expect > 0) { amt = expect; fixed = 'ไม่เจอยอดจ่าย ใช้ผลรวมรายการ'; }
@@ -317,7 +349,7 @@ function aiNormalize_(j, cats, model) {
     via: 'ai', model: model, kind: kind, docType: docType, date: date, time: String(j.time || '').slice(0, 5),
     amount: amt ? String(amt) : '', vendor: String(j.vendor || '').trim().slice(0, 80), desc: String(j.desc || '').trim().slice(0, 60),
     vat: vat, vatAmt: vatAmt ? String(vatAmt) : '', pricesIncVat: incVat,
-    service: service, discount: billDisc, discList: discList, items: items, check: check,
+    service: service, discount: billDisc, discList: discList, payList: payList, paid: paid, items: items, check: check,
     memo: String(j.memo || '').trim().slice(0, 120), pay: String(j.pay || ''), payer: String(j.payer || '').slice(0, 80), payee: String(j.payee || '').slice(0, 80), bank: String(j.bank || '').slice(0, 40), ref: String(j.ref || '').slice(0, 40),
     taxId: String(j.tax_id || '').replace(/\D/g, '').slice(0, 13), cat: cat, confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)),
   };
@@ -350,6 +382,13 @@ function aiReadUpload_(p) {
   const file = moneyFolder_(date.slice(0, 7)).createFile(Utilities.newBlob(bytes, mime, date + '_ใบเสร็จหาร' + (mime === 'application/pdf' ? '.pdf' : '.jpg')));
   const ocr = readDoc_(file, { cats: [], multi: 3 });
   return { ocr: ocr, file: { id: file.getId(), url: file.getUrl(), mime: mime, thumb: String(p.thumb || '').slice(0, 12000) }, ai: !!props.getProperty('GEMINI_API_KEY') };
+}
+
+/** อ่านใบเสร็จที่เก็บไว้แล้วซ้ำ (ใช้จัดส่วนลดของบิลหารเก่า) · อ่านอย่างเดียว ไม่สร้างไฟล์ */
+function aiReread_(p) {
+  const id = String(p.fileId || '');
+  if (!/^[\w-]{20,}$/.test(id)) throw new Error('ไม่มีรูปใบเสร็จ');
+  return { ocr: readDoc_(DriveApp.getFileById(id), { cats: [], multi: 3 }) };
 }
 
 /* ===================== 🧪 ชุดใบเสร็จตัวอย่าง (ใบที่ AI เคยอ่านผิด) ไว้ทดสอบซ้ำ ===================== */

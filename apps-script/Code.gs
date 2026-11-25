@@ -5,7 +5,7 @@
  * - สรุปเงินตอนเช้า + เตือนหารในกลุ่ม + สำรองชีตทุกสัปดาห์
  */
 
-const BACKEND_VER = 5;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
+const BACKEND_VER = 6;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
              // ดึงประชุมล่วงหน้ากี่วัน
 // ปฏิทินที่ดึงผ่านสะพาน (Bridge.gs ในบัญชีอื่น) ตั้งค่าใน Script properties: BRIDGE_URL, BRIDGE_KEY
 const BRIDGE_LABEL = 'พี่วุฒิ';
@@ -14,7 +14,7 @@ const TZ = 'Asia/Bangkok';
      // ตรวจงานที่ต้องเตือนทุก 15 นาที
 const props = PropertiesService.getScriptProperties();
 const APP_URL = 'https://nitithon-web.github.io/maewkwak/';   // 🐱 หน้าเว็บแมวกวัก (รีโป nitithon-web/maewkwak)
-const MONEY_ACTIONS = /^(status|ai_debug|ai_status|ai_health|ai_flag|ai_regress|ai_compare|ai_bench|ai_read|ai_voice|backup_now|money_\w+|owe_\w+|hk_setup|vault_\w+)$/;   // คำสั่งจากหน้าเว็บที่รับ
+const MONEY_ACTIONS = /^(status|ai_debug|ai_status|ai_health|ai_flag|ai_regress|ai_compare|ai_bench|ai_read|ai_reread|ai_voice|backup_now|money_\w+|owe_\w+|hk_setup|vault_\w+)$/;   // คำสั่งจากหน้าเว็บที่รับ
 
 /** ลิงก์ส่วนตัว: ฝัง API key ไว้หลัง # (ไม่ถูกส่งไปที่เซิร์ฟเวอร์) เปิดแล้วใช้ได้ทันที */
 function magicMsg_() {
@@ -102,6 +102,7 @@ function doPost(e) {
       case 'ai_bench':   return json_({ ok: true, ...aiBench_(body.id, body.model, body.think) });
       case 'ai_status':  return json_({ ok: true, ai: !!props.getProperty('GEMINI_API_KEY'), model: props.getProperty('GEMINI_MODEL') || AI_MODELS[0] });
       case 'ai_compare': return json_({ ok: true, ai: !!props.getProperty('GEMINI_API_KEY'), results: aiCompare_(body.ids, body.data, body.mime) });
+      case 'ai_reread':  return json_({ ok: true, ...aiReread_(body) });
       case 'ai_read':    return json_({ ok: true, ...aiReadUpload_(body) });
       case 'ai_flag':    return json_({ ok: true, ...aiFlag_(body) });       // 🧪 ปุ่ม AI อ่านผิด → เก็บเข้าชุดตัวอย่าง
       case 'ai_regress': return json_({ ok: true, ...aiRegress_(body) });    // 🧪 อ่านชุดตัวอย่างซ้ำทั้งหมด
