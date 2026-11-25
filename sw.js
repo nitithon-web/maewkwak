@@ -1,6 +1,6 @@
 /* แอปเงิน: เก็บไฟล์หน้าแอปไว้ในเครื่อง (ไฟล์ร่วมอยู่โฟลเดอร์แม่) */
-const CACHE = 'ngoen-v112';
-const FILES = ['./', 'money.html', 'split.html', 'vault.html', 'hk.html', 'hk.js', 'jod.png', 'manifest.json', 'style.css', 'hub.js', 'mcore.js', 'money.js', 'owe.js', 'qrcode.js', 'vault.js', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
+const CACHE = 'ngoen-v113';
+const FILES = ['./', 'money.html', 'split.html', 'vault.html', 'hk.html', 'hk.js', 'jod.png', 'manifest.json', 'style.css', 'hub.js', 'mcore.js', 'money.js', 'owe.js', 'scat.js', 'qrcode.js', 'vault.js', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));

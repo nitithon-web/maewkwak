@@ -16,6 +16,7 @@
 - `money.html` (รายรับรายจ่าย + `#owe` ค้างกัน) `split.html` (หารกัน) `vault.html` (ตู้รหัสส่วนตัว ตู้เดียว) · `index.html` → money.html
 - `hub.js` ป้ายซิงก์ กล่องรอส่ง ตั้งค่า ไมค์ · เก็บลิงก์ส่วนตัวที่ LS `m:cfg` · เครื่องที่ยังไม่มี key หรือ key เก่า ขึ้นหน้าต่างเชื่อมเครื่อง `hubConnect` (ปุ่มขอลิงก์ในแชท / วางลิงก์ — iPhone ที่เปิดจากไอคอนหน้าจอโฮมเก็บข้อมูลแยกจาก LINE)
 - `mcore.js` `money.js` `owe.js` `vault.js` `qrcode.js` `style.css` — ของรีโปนี้เอง (แก้ที่นี่)
+- `scat.js` (หน้าหารกัน โหลดหลัง owe.js · owe.js เรียกผ่าน `typeof` ทุกจุด): 🏷 หมวดของบิล `sp.cat` (`SCATS`: วิธีหารเริ่มต้น + รายการแนะนำ + หมวดรายจ่ายของส่วนเรา `scatMoney`) · วิธีหาร `unit` = ตามชั่วโมง/ชิ้น (`b.lines[]` {name, price, unit, rate ราคาต่อหน่วย, step, def, u{คน:จำนวน}} → `unitShares`) · 🪙 ปัดยอดโอน `sp.round` (`roundTransfers`) · 🤖 เดาหมวดจากใบเสร็จ `scatGuess` (คำในชื่อร้าน/รายการ ไม่แตะ prompt AI) · 💾 ชุดของกลุ่ม = เอกสาร Owe `kind:'tpl'` (`#tDlg`, `openFromTpl`, บิลที่สร้างจากชุดมี `tplId`) · 🗓 ชุดหารทุกเดือน `monthly` (วันที่) → หลังบ้าน `splitMonthly_` เตือน LINE เดือนละครั้ง (`lastRemind`) ลิงก์ `split.html?tpl=<id>` + แถบ "ถึงรอบหาร" ในหน้า · 📊 สรุปเดือน `#spMonth` แยกหมวด/กลุ่ม
 - `hk.html` `hk.js` + `jod*.png` — แอปเล็กหารในกลุ่ม LINE (ไม่โหลด hub.js)
 - `sw.js` (CACHE `ngoen-vNN`) · `manifest.json`
 
@@ -24,7 +25,7 @@
 - `Slip.gs` — รูปสลิป/ใบเสร็จจาก LINE → โฟลเดอร์ รอจัด → ปุ่ม 💸 จ่าย / 💰 รับ / 💵 คืนจาก… / 🗑
 - `Money.gs` — รายรับรายจ่าย หมวด งบ รายการประจำ เป้าออม (`MONEY_CFG`)
 - `Chat.gs` — จดเงินจากข้อความ (`saveAs_`) + ปุ่ม ↔ รับ/จ่าย
-- `Owe.gs` — ค้างกัน · `Group.gs` — หารในกลุ่ม LINE + API แอปเล็ก `hk_*` · `Line.gs` — คำสั่งพิมพ์ใน OA (`moneyLineText_`, `MONEY_HELP`) + สรุปเช้า
+- `Owe.gs` — ค้างกัน (เอกสาร debt / split / tpl) + `splitMonthly_` (เรียกใน checkReminders) · `Group.gs` — หารในกลุ่ม LINE + API แอปเล็ก `hk_*` · `Line.gs` — คำสั่งพิมพ์ใน OA (`moneyLineText_`, `MONEY_HELP`) + สรุปเช้า
 - `Ai.gs` — Gemini อ่านใบเสร็จ/สลิป/เสียง · ชุดใบตัวอย่าง `ai_flag` / `ai_regress` (แก้ prompt/รุ่น AI ให้รัน ai_regress ก่อนและหลัง)
   · ส่วนลด `discounts[]` = {name, amount, kind: item|combo|bill|pay, item, items[]} → `aiNormalize_` ผูกเข้าเมนู (combo หารตามราคาเมนูที่ร่วมโปร) · pay (เหรียญ ALL member/แต้ม/บัตรกำนัล) ไม่ใช่ส่วนลด → `payList` ยอดบิลนับรวม
   · ยอดที่ AI ให้มาเท่ายอดก่อนลด (เซเว่น) → ใช้ส่วนลดแบบรายการเสมอ แล้วตั้งยอด = ก่อนลด − ส่วนลด (ถ้าเลือกด้วยการเทียบยอด แบบที่ขาดส่วนลดจะชนะ)

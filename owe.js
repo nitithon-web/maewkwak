@@ -351,7 +351,7 @@ async function forgive(d) {
 
 /* ---------- 🍜 หารกัน ---------- */
 let sp = null;     // บิลหารที่กำลังแก้
-const blankBill = payer => ({ id: uid(), title: '', payer: payer || ME, method: 'equal', total: '', who: [...sp.people], custom: {}, items: [], svc: false, vat: false, disc: '' });
+const blankBill = payer => ({ id: uid(), title: '', payer: payer || ME, method: 'equal', total: '', who: [...sp.people], custom: {}, items: [], lines: [], svc: false, vat: false, disc: '' });
 function openSplit(s, silent) {
   if (s && !silent) {
     const ds = debts().filter(d => d.splitId === s.id);
@@ -381,6 +381,7 @@ function openSplit(s, silent) {
   f.title.value = sp.title; f.date.value = sp.date;
   f.date.oninput = () => { sp.dateTouched = true; };
   $('#sDel').hidden = !s;
+  if (typeof paintCat === 'function') paintCat();
   paintSplit();
   if (!silent) $('#sDlg').showModal();
 }
@@ -546,6 +547,7 @@ const discOpen = {};
 const oldDiscNames = (b, people) => (b.items || []).filter(it => DISC_RE.test(it.name || '') && !(it.who || []).filter(p => people.includes(p)).length).map(it => it.name).join(', ');
 document.addEventListener('toggle', e => { const d = e.target; if (d.classList && d.classList.contains('disc-box')) discOpen[d.dataset.key] = d.open; }, true);
 function billShares(b) {
+  if (b.method === 'unit' && typeof unitShares === 'function') return unitShares(b);
   const sh = {};
   if (b.method === 'custom') {
     sp.people.forEach(p => { const v = toS(b.custom[p]); if (v) sh[p] = v; });
@@ -597,7 +599,8 @@ function calcSplit() {
   });
   const net = {};
   sp.people.forEach(p => { net[p] = (paid[p] || 0) - (share[p] || 0); });
-  return { share, paid, total, transfers: settle(net) };
+  const tr = settle(net);
+  return { share, paid, total, transfers: typeof roundTransfers === 'function' ? roundTransfers(tr) : tr };
 }
 
 function chipsHtml(sel, cls) {
@@ -628,13 +631,16 @@ function paintSplit() {
         ${b.aiCheck && !b.aiCheck.ok ? `<small class="s-warn">⚠️ เมนูที่ AI อ่านรวมกันแล้วไม่ตรงยอด (ต่าง ${bahtS(toS(Math.abs(b.aiCheck.diff)))}) เช็กเมนูกับใบเสร็จก่อนบันทึก</small>` : ''}
         ${b.file && b.file.id ? `<button type="button" class="link-btn s-flag" ${b.flagged ? 'disabled' : ''}>${b.flagged ? '✓ ส่งให้ทดสอบแล้ว' : 'AI อ่านผิด?'}</button>` : ''}</div>
       <label>ใครจ่ายไปก่อน <select class="s-payer">${sp.people.map(p => `<option value="${esc(p)}" ${p === b.payer ? 'selected' : ''}>${esc(who(p))}</option>`).join('')}</select></label>
-      <div class="seg s-method">${[['equal', 'หารเท่ากัน'], ['custom', 'ระบุเอง'], ['menu', 'ตามเมนู']].map(([v, t]) => `<button type="button" data-v="${v}" class="${b.method === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="seg s-method">${[['equal', 'เท่ากัน'], ['custom', 'ระบุเอง'], ['menu', 'ตามเมนู'], ['unit', 'ชม./ชิ้น']].map(([v, t]) => `<button type="button" data-v="${v}" class="${b.method === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="s-sug when-chips wrap"></div>
       <div class="s-body"></div>`;
     const body = el.querySelector('.s-body');
     if (b.method === 'equal') {
       body.innerHTML = `<label>ยอดรวม <input class="s-total" inputmode="decimal" placeholder="0" value="${esc(b.total)}"></label><span class="lbl">หารกับใคร</span><div class="when-chips wrap s-who">${chipsHtml(b.who)}</div>`;
       body.querySelector('.s-total').oninput = e => { b.total = e.target.value; paintSum(); };
       body.querySelector('.s-who').onclick = e => { const c = e.target.closest('button'); if (!c) return; const p = c.dataset.p; b.who = b.who.includes(p) ? b.who.filter(x => x !== p) : [...b.who, p]; c.classList.toggle('on'); paintSum(); };
+    } else if (b.method === 'unit' && typeof unitBody === 'function') {
+      unitBody(b, body);
     } else if (b.method === 'custom') {
       body.innerHTML = sp.people.map(p => `<label class="s-cust"><span>${esc(who(p))}</span><input inputmode="decimal" data-p="${esc(p)}" placeholder="0" value="${esc(b.custom[p] || '')}"></label>`).join('');
       body.querySelectorAll('input').forEach(i => i.oninput = () => { b.custom[i.dataset.p] = i.value; paintSum(); });
@@ -657,6 +663,7 @@ function paintSplit() {
       body.querySelector('.s-extra').onclick = e => { const c = e.target.closest('button'); if (!c) return; b[c.dataset.x] = !b[c.dataset.x]; c.classList.toggle('on'); paintSum(); };
       body.querySelector('.s-disc').oninput = e => { b.disc = e.target.value; b.discs = null; paintSum(); };
     }
+    if (typeof paintSug === 'function') paintSug(b, el.querySelector('.s-sug'));
     el.querySelector('.s-payer').onchange = e => { b.payer = e.target.value; paintSum(); };
     el.querySelector('.s-read').onclick = () => readReceiptFor(b);
     const fl = el.querySelector('.s-flag');
@@ -665,6 +672,7 @@ function paintSplit() {
       const c = e.target.closest('button'); if (!c) return;
       b.method = c.dataset.v;
       if (b.method === 'menu' && !b.items.length) b.items.push({ name: '', price: '', who: [...sp.people], all: true });
+      if (b.method === 'unit' && !(b.lines || []).length && typeof newLine === 'function') { const c = scatOf(sp.cat); b.lines = [newLine(c && c.method === 'unit' ? c.sug[0] : null)]; }
       if (b.method === 'custom' && b.total && !Object.keys(b.custom).length) { const r = billShares({ ...b, method: 'equal' }); Object.entries(r.shares).forEach(([p, v]) => { b.custom[p] = fromS(v); }); }
       paintSplit();
     };
@@ -722,6 +730,7 @@ async function onReceiptFile(e) {
       else { b.disc = ''; b.discs = []; }
       b.pays = (o.payList || []).map(d => ({ n: d.n, a: String(d.a) }));
     } else if (o.amount) { b.method = 'equal'; b.total = String(o.amount); }
+    if (typeof scatFromReceipt === 'function') scatFromReceipt(o);
     paintSplit();
     const msg = !r.ai ? '⚠️ ยังไม่ได้ตั้งค่า AI (อ่านแบบเดิม) ตรวจรายการอีกครั้ง'
       : o.via === 'ocr' ? '⚠️ ตอนนี้ AI ไม่ตอบ อ่านได้แค่ยอดรวม ลองกดอ่านใบเสร็จใหม่อีกครั้งในอีกสักครู่'
@@ -759,7 +768,7 @@ function paintSum() {
   const rcpt = sp.bills.reduce((s2, b) => s2 + toS(b.rTotal || 0), 0);
   const diff = rcpt && Math.abs(rcpt - r.total) >= 100 ? `<p class="note warn">⚠️ ยอดที่หาร ${bahtS(r.total)} ไม่ตรงกับยอดในใบเสร็จ ${bahtS(rcpt)} (ต่าง ${bahtS(Math.abs(rcpt - r.total))}) ลองเช็ก Service / VAT / ส่วนลด หรือเมนูที่ขาด</p>` : '';
   const pays = sp.bills.map((b, bi) => (b.pays || []).length ? `<p class="note">💳 คนจ่ายใช้ ${esc(b.pays.map(d => d.n).join(', '))} ${bahtS(b.pays.reduce((x, d) => x + toS(d.a), 0))} แทนเงินสด · นับเป็นเงินของ${esc(who(b.payer))} เพื่อนจ่ายตามราคาจริง <button type="button" class="link-btn pay-share" data-b="${bi}">หารเป็นส่วนลดทุกคนแทน</button></p>` : '').join('');
-  $('#sSum').innerHTML = `<h4>ส่วนของแต่ละคน</h4>${rows}<div class="tot"><span>รวม</span><b>${bahtS(r.total)}</b></div>${discBox(sp.bills, sp.people, 'edit')}${pays}${diff}${tr}
+  $('#sSum').innerHTML = `<h4>ส่วนของแต่ละคน</h4>${rows}<div class="tot"><span>รวม</span><b>${bahtS(r.total)}</b></div>${discBox(sp.bills, sp.people, 'edit')}${pays}${diff}${tr}${typeof sumExtra === 'function' && r.transfers.length + (sp.round ? 1 : 0) ? sumExtra(r) : ''}
     <p class="note">📒 จดลงรายจ่ายเฉพาะส่วนของเรา <b>${bahtS(mine)}</b> · ที่เหลือเป็น "ค้างกัน" ไม่ทำให้ยอดใช้จ่ายเพี้ยน</p>`;
 }
 
@@ -787,7 +796,7 @@ async function saveSplit(quiet) {
   sp.bills.forEach(b => { b.shares = Object.fromEntries(Object.entries(b._shares).map(([p, v]) => [p, fromS(v)])); b.sum = fromS(b._total); delete b._shares; delete b._total; });
   sp.total = fromS(r.total);
   const mine = r.share[ME] || 0;
-  if (mine) sp.moneyId = await moneyPut(sp.moneyId, { date: sp.date, amount: fromS(mine), cat: guessCat('out', sp.title) || 'อาหาร', note: `${sp.title} (หาร ${sp.people.length} คน · ส่วนของฉัน)` });
+  if (mine) sp.moneyId = await moneyPut(sp.moneyId, { date: sp.date, amount: fromS(mine), cat: (typeof scatMoney === 'function' && scatMoney(sp)) || guessCat('out', sp.title) || 'อาหาร', note: `${sp.title} (หาร ${sp.people.length} คน · ส่วนของฉัน)` });
   else if (sp.moneyId) { moneyDel(sp.moneyId); sp.moneyId = ''; }
   $('#sDlg').close();
   if (gone.length) await delDocs(gone);
@@ -848,7 +857,7 @@ function renderSplits() {
     el.className = 'ow-card sp-card' + (pg.done >= pg.all ? ' closed' : '');
     const mine = toS((s.bills || []).reduce((x, b) => x + Number((b.shares || {})[ME] || 0), 0));
     const pics = (s.bills || []).filter(b => b.file && b.file.thumb).slice(0, 1).map(b => `<img src="${b.file.thumb}" alt="">`).join('');
-    el.innerHTML = `<div class="ow-row">${pics ? `<span class="sp-pic">${pics}</span>` : '<span class="av">🍜</span>'}
+    el.innerHTML = `<div class="ow-row">${pics ? `<span class="sp-pic">${pics}</span>` : `<span class="av">${(typeof scatIcon === 'function' && scatIcon(s)) || '🍜'}</span>`}
       <div class="ow-mid"><b>${esc(s.title)}</b> ${pg.all ? (pg.done >= pg.all ? '<span class="tag ok">โอนครบ</span>' : `<span class="tag">รอโอน ${pg.all - pg.done}</span>`) : ''}
       <div class="meta">${fmtD(s.date)} · ${(s.people || []).length} คน${(s.bills || []).length > 1 ? ' · ' + s.bills.length + ' บิล' : ''} · ส่วนเรา ${bahtS(mine)}</div></div>
       <b>${bahtS(toS(s.total))}</b></div>
@@ -865,6 +874,7 @@ function renderSplits() {
     closed.forEach(x => det.lastElementChild.appendChild(card(x)));
     box.appendChild(det);
   }
+  if (typeof scatRender === 'function') scatRender();
 }
 
 if ($('#spQ')) $('#spQ').addEventListener('input', () => renderSplits());
@@ -973,7 +983,8 @@ function openDetail(id) {
 function paintDetail() {
   const s = splits().find(x => x.id === dId);
   if (!s) { if ($('#dDlg').open) $('#dDlg').close(); return; }
-  $('#dTitle').textContent = '🍜 ' + s.title;
+  const sIc = (typeof scatIcon === 'function' && scatIcon(s)) || '🍜';
+  $('#dTitle').textContent = sIc + ' ' + s.title;
   $('#dMeta').textContent = `${fmtD(s.date)} · รวม ${bahtS(toS(s.total))} · ${(s.people || []).length} คน`;
   // ใบเสร็จ
   const pics = (s.bills || []).filter(b => b.file);
@@ -1007,6 +1018,8 @@ function paintDetail() {
         (toS(b.disc) ? (Array.isArray(b.discs) && b.discs.length && b.discs.reduce((x, d) => x + toS(d.a), 0) === toS(b.disc)
           ? b.discs.map(d => `<div class="di-r sub disc"><span>🏷 ${esc(d.n || 'ส่วนลด')}<small>หารตามสัดส่วนที่กิน</small></span><b>−${bahtS(toS(d.a))}</b></div>`).join('')
           : `<div class="di-r sub disc"><span>🏷 ${esc(oldNames || 'ส่วนลดท้ายบิล')}</span><b>−${bahtS(toS(b.disc))}</b></div>`) : '');
+    } else if (b.method === 'unit' && typeof unitDetail === 'function') {
+      body = unitDetail(b, s, eaten);
     } else if (b.method === 'custom') {
       body = `<div class="di-r"><span>ระบุยอดเองรายคน</span><b></b></div>`;
       Object.keys(b.shares || {}).forEach(p => { (eaten[p] = eaten[p] || []).push(esc(bills.length > 1 ? (b.title || 'บิล') + ' (ระบุเอง)' : 'ระบุยอดเอง')); });
@@ -1052,8 +1065,8 @@ function paintDetail() {
   });
   // ข้อความสรุปส่งเข้ากลุ่ม
   const menu = (s.bills || []).filter(b => b.method === 'menu').flatMap(b => (b.items || []).filter(it => it.name || toS(it.price)).map(it => `• ${it.name || 'เมนู'} ${num(toS(it.price))}${toS(it.disc) ? ' ลด ' + num(toS(it.disc)) : ''}${(it.who || []).length && (it.who || []).length < (s.people || []).length ? ' (' + it.who.map(whoMsg).join(', ') + ')' : ''}`));
-  const lines = [`🍜 ${s.title} (${fmtD(s.date)}) รวม ${fromS(toS(s.total)).toLocaleString('th-TH')} บาท`]
-    .concat(menu.length ? ['', 'รายการ:'].concat(menu) : [])
+  const lines = [`${sIc} ${s.title} (${fmtD(s.date)}) รวม ${fromS(toS(s.total)).toLocaleString('th-TH')} บาท`]
+    .concat((() => { const all = menu.concat(typeof unitMsgLines === 'function' ? unitMsgLines(s) : []); return all.length ? ['', 'รายการ:'].concat(all) : []; })())
     .concat(['', 'ส่วนของแต่ละคน:'])
     .concat((s.people || []).map(p => `• ${whoMsg(p)} ${fromS(share[p] || 0).toLocaleString('th-TH')}`))
     .concat((s.transfers || []).length ? ['', 'โอนให้จบ:'].concat(s.transfers.map(t => `• ${whoMsg(t.from)} → ${whoMsg(t.to)} ${Number(t.amount).toLocaleString('th-TH')} บาท`)) : []);
@@ -1123,15 +1136,20 @@ async function fixOldDiscounts() {
       $('#busyMsg') && ($('#busyMsg').textContent = `AI กำลังอ่านใบเสร็จ ${s0.title}…`);
       let o;
       try { o = (await api('ai_reread', { fileId: b.file.id })).ocr || {}; } catch (err) { note = 'อ่านใบเสร็จไม่ได้ (' + err.message + ')'; continue; }
-      const its = (o.items || []).filter(it => it.price > 0);
+      const its = (o.items || []).filter(it => it.price > 0 && !/^(ส่วนลด|สวนลด|ส่วนลค)/.test(String(it.name || '').trim()));
       const savedGross = b.items.reduce((x, it) => x + toS(it.price), 0);
       const savedDisc = b.items.reduce((x, it) => x + toS(it.disc), 0) + toS(b.disc);
       const newGross = its.reduce((x, it) => x + toS(it.price), 0);
       const newDisc = its.reduce((x, it) => x + toS(it.disc || 0), 0) + toS(o.discount || 0);
-      // จับคู่เมนูที่ AI อ่านใหม่กับเมนูที่บันทึกไว้ (ชื่อเดียวกัน)
-      const pairs = its.map(it => [it, b.items.find(x => normName(x.name) === normName(it.name)) || b.items.find(x => normName(x.name).includes(normName(it.name)) || normName(it.name).includes(normName(x.name)))]);
-      if (Math.abs(newGross - savedGross) > 50 || Math.abs(newDisc - savedDisc) > 50 || pairs.some(([it, x]) => toS(it.disc) && !x)) {
-        note = `AI อ่านใหม่ได้ส่วนลด ${bahtS(newDisc)} ต่างจากที่บันทึก ${bahtS(savedDisc)} · เปิดบิลตรวจเองได้`;
+      // ชื่อตรง → ชื่อคล้าย → ราคาเท่ากันชิ้นเดียว (AI อ่านชื่อเพี้ยนได้ เช่น ฟุตลอง/ฟุดลอง)
+      const used = new Set(), pairs = its.map(it => [it, null]);
+      const take = (pr, fn) => { if (pr[1]) return; const x = b.items.find(x => !used.has(x) && fn(x, pr[0])); if (x) { used.add(x); pr[1] = x; } };
+      pairs.forEach(pr => take(pr, (x, it) => normName(x.name) === normName(it.name)));
+      pairs.forEach(pr => take(pr, (x, it) => normName(x.name).includes(normName(it.name)) || normName(it.name).includes(normName(x.name))));
+      pairs.forEach(pr => { if (pr[1]) return; const same = b.items.filter(x => !used.has(x) && toS(x.price) === toS(pr[0].price)); if (same.length === 1) { used.add(same[0]); pr[1] = same[0]; } });
+      const unmatched = pairs.filter(([it, x]) => toS(it.disc) && !x).map(([it]) => it.name);
+      if (Math.abs(newGross - savedGross) > 100 || Math.abs(newDisc - savedDisc) > 100 || unmatched.length) {
+        note = unmatched.length ? `หาเมนู "${unmatched[0]}" ในบิลไม่เจอ ใช้ส่วนลดตามที่บันทึกไว้` : `AI อ่านใหม่ได้ยอดไม่ตรงกับที่บันทึก (ส่วนลด ${bahtS(newDisc)} / บันทึก ${bahtS(savedDisc)}) ใช้ส่วนลดตามที่บันทึกไว้`;
         b.discFixed = 1; changed = true; continue;
       }
       b.items.forEach(x => { x.disc = ''; x.discs = []; x.discNote = ''; });
@@ -1148,7 +1166,7 @@ async function fixOldDiscounts() {
     }
     if (!changed) { report.push(`• ${s0.title} ${fmtD(s0.date)}: ${note || 'ไม่มีอะไรต้องแก้'}`); continue; }
     const after = await saveSplit(true);
-    report.push(`• ${s0.title} ${fmtD(s0.date)}: ${note || `ส่วนของคุณ ${bahtS(before)} → ${bahtS(after)}`}`);
+    report.push(`• ${s0.title} ${fmtD(s0.date)}: ${note ? note + ' · ' : ''}ส่วนของคุณ ${bahtS(before)} → ${bahtS(after)}`);
   }
   } finally { busyEnd(); }
   alert('🏷 จัดส่วนลดบิลเก่าแล้ว\n\n' + report.join('\n'));
