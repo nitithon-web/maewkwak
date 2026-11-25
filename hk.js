@@ -434,11 +434,11 @@ async function submitCreate() {
   busy(btn, true);
   try {
     const d = await call(cs.edit ? 'hk_edit' : 'hk_create', payload);
-    if (d.pool) {   // 🏦 บิลจากกอง: แจ้งกลุ่มสั้นๆ แล้วกลับหน้ากอง
-      await postToChat(d.msg);
-      toast('บันทึกบิลจากกองแล้ว');
+    if (d.pool) {   // 🏦 บิลจากกอง: แจ้งกลุ่ม แล้วกลับหน้ากอง (ส่งไม่ออก = มีปุ่มส่งอีกครั้ง)
+      const sent = await postToChat(d.msg);
+      toast(cs.edit ? 'แก้บิลจากกองแล้ว' : 'บันทึกบิลจากกองแล้ว');
       stack = [{ name: 'home' }];
-      view = { name: 'pool', pool: d.pool };
+      view = { name: 'pool', pool: d.pool, unsent: sent ? null : d.msg };
       draw();
       return;
     }
@@ -454,31 +454,43 @@ async function submitCreate() {
 /* ===================== 🏦 กองกลาง ===================== */
 let ps = null;
 function drawPoolNew() {
-  $('#ttl').textContent = 'สร้างกองกลาง';
+  const add = ps.add;   // เพิ่มคน / เก็บเงินเพิ่ม ของกองที่เปิดอยู่
+  $('#ttl').textContent = add ? 'เพิ่มคน / เก็บเงินเพิ่ม' : 'สร้างกองกลาง';
   const on = ps.people.filter(p => p.on);
   const sum = toS(ps.my) + on.reduce((x, p) => x + toS(p.inS), 0);
   $('#app').innerHTML = `
-    <h1>สร้างกองกลาง</h1>
-    <div class="lbl" style="padding:0 4px">คุณเป็นคนถือเงินกอง เพื่อนจะได้บิล "ลงกอง" ให้โอนเข้าคุณ แล้วค่าใช้จ่ายระหว่างทริปให้คุณกด "จ่ายจากกอง" จบทริปกดปิดกอง ระบบคิดให้ว่าใครเติม ใครได้คืน</div>
+    <h1>${add ? 'เพิ่มคน / เก็บเงินเพิ่ม' : 'สร้างกองกลาง'}</h1>
+    <div class="lbl" style="padding:0 4px">${add ? `กอง "${esc(add.name)}" · ติ๊กคนใหม่ที่จะเข้ากอง หรือคนเดิมที่จะเก็บเงินเพิ่ม ใส่ยอดที่ต้องโอนรอบนี้ (คนใหม่ใส่ 0 ได้ถ้ายังไม่เก็บ) ระบบส่งบิล "ลงกองเพิ่ม" เข้ากลุ่ม` : 'คุณเป็นคนถือเงินกอง เพื่อนจะได้บิล "ลงกอง" ให้โอนเข้าคุณ แล้วค่าใช้จ่ายระหว่างทริปให้คุณกด "จ่ายจากกอง" จบทริปกดปิดกอง ระบบคิดให้ว่าใครเติม ใครได้คืน · ในกลุ่มโชว์แค่ยอดรวม ยอดของแต่ละคนดูได้ในหน้ากอง (ทุกคนในกองเห็นเหมือนกัน)'}</div>
     <div class="sec" style="padding:12px 14px;display:flex;gap:12px">
-      <label class="field" style="flex:1.4"><span class="lbl">ชื่อกอง</span><input id="pName" type="text" maxlength="40" placeholder="เช่น ทริปเขาใหญ่" value="${esc(ps.name)}"></label>
-      <label class="field" style="flex:1"><span class="lbl">ลงคนละ (บาท)</span><input id="pEach" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(ps.each)}"></label>
+      ${add ? '' : `<label class="field" style="flex:1.4"><span class="lbl">ชื่อกอง</span><input id="pName" type="text" maxlength="40" placeholder="เช่น ทริปเขาใหญ่" value="${esc(ps.name)}"></label>`}
+      <label class="field" style="flex:1"><span class="lbl">${add ? 'เก็บเพิ่มคนละ (บาท)' : 'ลงคนละ (บาท)'}</span><input id="pEach" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(ps.each)}"></label>
     </div>
-    <button type="button" class="sec row-btn pl-sw" id="pEq" aria-pressed="${ps.equal}"><span class="sw" aria-hidden="true"></span><span class="mid"><span class="nm">หารเท่ากันทั้งกอง</span><span class="lbl">${ps.equal ? 'ไปด้วยกันทุกที่ ทุกบิลหารเท่ากันทุกคนในกอง เหลือคืนตามที่ลง ขาดเติมเท่ากัน' : 'ปิดอยู่: แต่ละบิลเลือกคนและวิธีหารเองได้ (เช่น มีคนไม่ได้กินบางมื้อ)'}</span></span></button>
+    ${add ? '' : `<button type="button" class="sec row-btn pl-sw" id="pEq" aria-pressed="${ps.equal}"><span class="sw" aria-hidden="true"></span><span class="mid"><span class="nm">หารเท่ากันทั้งกอง</span><span class="lbl">${ps.equal ? 'ไปด้วยกันทุกที่ ทุกบิลหารเท่ากันทุกคนในกอง เหลือคืนตามที่ลง ขาดเติมเท่ากัน' : 'ปิดอยู่: แต่ละบิลเลือกคนและวิธีหารเองได้ (เช่น มีคนไม่ได้กินบางมื้อ)'}</span></span></button>`}
     <div class="sec list">
       <div class="item"><div class="mid"><div class="nm">${esc(home.me.disp || 'ฉัน')} (ฉัน)</div><div class="lbl">ถือเงินกอง · ส่วนที่ฉันลงเอง</div></div><input class="amt-in num" data-pmy inputmode="decimal" placeholder="0" value="${esc(ps.my)}"></div>
-      ${ps.people.map((p, i) => `<div class="item ${p.on ? '' : 'dim'}"><button type="button" class="chk" data-pon="${i}" aria-pressed="${p.on}" aria-label="${esc(p.name)} ลงกอง">${p.on ? '✓' : ''}</button><div class="mid"><div class="nm">${esc(p.name)}</div></div>${p.on ? `<input class="amt-in num" data-pin="${i}" inputmode="decimal" placeholder="0" value="${esc(p.inS)}">` : ''}</div>`).join('') || '<div class="empty">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวักก่อน</div>'}
+      ${ps.people.map((p, i) => `<div class="item ${p.on ? '' : 'dim'}"><button type="button" class="chk" data-pon="${i}" aria-pressed="${p.on}" aria-label="${esc(p.name)} ลงกอง">${p.on ? '✓' : ''}</button><div class="mid"><div class="nm">${esc(p.name)}</div>${p.inPool ? '<div class="lbl">อยู่ในกองแล้ว</div>' : add && p.on ? '<div class="lbl">คนใหม่</div>' : ''}</div>${p.on ? `<input class="amt-in num" data-pin="${i}" inputmode="decimal" placeholder="0" value="${esc(p.inS)}">` : ''}</div>`).join('') || '<div class="empty">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวักก่อน</div>'}
     </div>`;
   const A = $('#app');
-  $('#pName').oninput = e => { ps.name = e.target.value; };
-  $('#pEq').onclick = () => { ps.equal = !ps.equal; drawPoolNew(); };
-  $('#pEach').oninput = e => { ps.each = e.target.value; ps.my = ps.each; ps.people.forEach(p => { if (p.on) p.inS = ps.each; }); A.querySelectorAll('[data-pin]').forEach(i => { i.value = ps.each; }); A.querySelector('[data-pmy]').value = ps.each; sumFoot(); };
+  if (!add) { $('#pName').oninput = e => { ps.name = e.target.value; }; $('#pEq').onclick = () => { ps.equal = !ps.equal; drawPoolNew(); }; }
+  $('#pEach').oninput = e => { ps.each = e.target.value; if (!add) { ps.my = ps.each; A.querySelector('[data-pmy]').value = ps.each; } ps.people.forEach(p => { if (p.on) p.inS = ps.each; }); A.querySelectorAll('[data-pin]').forEach(i => { i.value = ps.each; }); sumFoot(); };
   A.querySelector('[data-pmy]').oninput = e => { ps.my = e.target.value; sumFoot(); };
   A.querySelectorAll('[data-pon]').forEach(b => b.onclick = () => { const p = ps.people[+b.dataset.pon]; p.on = !p.on; if (p.on && !p.inS) p.inS = ps.each; drawPoolNew(); });
   A.querySelectorAll('[data-pin]').forEach(i => i.oninput = () => { ps.people[+i.dataset.pin].inS = i.value; sumFoot(); });
   function sumFoot() { const t = toS(ps.my) + ps.people.filter(p => p.on).reduce((x, p) => x + toS(p.inS), 0); const el = $('#pSum'); if (el) el.textContent = 'รวมเงินกอง ' + baht(t); }
-  foot(`<div class="sum"><span class="lbl">${on.length} คนลงกอง + คุณ</span><span id="pSum" style="font-weight:600">รวมเงินกอง ${baht(sum)}</span></div><button class="btn ink" type="button" id="pGo">สร้างกองและส่งบิลลงกองเข้ากลุ่ม</button>`);
+  foot(`<div class="sum"><span class="lbl">${on.length} คน${add ? 'ในรอบนี้' : 'ลงกอง + คุณ'}</span><span id="pSum" style="font-weight:600">รวมเงินกอง ${baht(sum)}</span></div><button class="btn ink" type="button" id="pGo">${add ? 'บันทึกและส่งบิลลงกองเพิ่มเข้ากลุ่ม' : 'สร้างกองและส่งบิลลงกองเข้ากลุ่ม'}</button>`);
   $('#pGo').onclick = async () => {
+    if (add) {
+      const members = ps.people.filter(p => p.on).map(p => ({ uid: p.uid, inS: toS(p.inS) }));
+      if (!members.length && !toS(ps.my)) { toast('ติ๊กคนใหม่ หรือคนที่จะเก็บเงินเพิ่ม'); return; }
+      const b = $('#pGo'); busy(b, true);
+      try {
+        const d = await call('hk_pool_add', { p: add.id, myInS: toS(ps.my), members: members });
+        const sent = d.msg.length ? await postToChat(d.msg) : true;
+        toast('บันทึกแล้ว');
+        stack = [{ name: 'home' }]; view = { name: 'pool', pool: d.pool, unsent: sent ? null : d.msg }; draw();
+      } catch (e) { toast(e.message); busy(b, false); }
+      return;
+    }
     if (!ps.name.trim()) { $('#pName').focus(); toast('ตั้งชื่อกองก่อน'); return; }
     const members = ps.people.filter(p => p.on).map(p => ({ uid: p.uid, inS: toS(p.inS) }));
     if (!members.length) { toast('แตะเลือกเพื่อนที่ลงกองอย่างน้อย 1 คน'); return; }
@@ -488,7 +500,7 @@ function drawPoolNew() {
       const sent = d.msg ? await postToChat(d.msg) : true;
       toast(sent ? 'สร้างกองแล้ว ส่งบิลลงกองเข้ากลุ่มแล้ว' : 'สร้างกองแล้ว');
       await loadHome();
-      stack = [{ name: 'home' }]; view = { name: 'pool', pool: d.pool }; draw();
+      stack = [{ name: 'home' }]; view = { name: 'pool', pool: d.pool, unsent: sent ? null : d.msg }; draw();
     } catch (e) { toast(e.message); busy(b, false); }
   };
 }
@@ -504,7 +516,7 @@ function poolDash(P) {
   return `<div class="sec pl-dash">
       <div class="pl-bl"><span class="lbl">ใช้ไปแล้ว ${pct}%</span><span class="lbl">${over ? 'ใช้เกินกอง ' + baht(-P.leftS) : 'เฉลี่ยคนละ ' + baht(Math.round(P.spentS / n))}</span></div>
       <div class="pl-tr big ${over ? 'over' : ''}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="ใช้เงินกองไป ${pct}%"><i style="width:${Math.max(pct, P.spentS ? 2 : 0)}%"></i></div>
-      ${P.planS > P.inS ? `<div class="lbl">ยังไม่โอนลงกอง ${baht(P.planS - P.inS)}</div>` : ''}
+      ${P.status === 'open' && P.planS > P.inS ? `<div class="lbl">ยังไม่โอนลงกอง ${baht(P.planS - P.inS)}${P.toldS ? ' (แจ้งโอนแล้ว รอยืนยัน ' + baht(P.toldS) + ')' : ''}</div>` : ''}
     </div>
     ${cats.length ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใช้ไปกับอะไร</div>${cats.map(([k, v]) => { const c = catOf(k); return bar(c ? c[2] : 'อื่นๆ', v, cMax, c ? c[1] : '🧾'); }).join('')}</div>` : ''}
     ${days.length > 1 ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใช้รายวัน</div>${days.map(([d, v]) => bar(thDate(d), v, dMax)).join('')}</div>` : ''}`;
@@ -515,46 +527,104 @@ async function openPool(id, root) {
   catch (e) { toast(e.message); if (root) show('home', true); else draw(); }
 }
 function drawPool() {
-  const P = view.pool, open = P.status === 'open';
+  const P = view.pool, open = P.status === 'open', H = P.isHolder;
   $('#ttl').textContent = '🏦 ' + P.name;
-  const row = r => `<div class="item"><div class="mid"><div class="nm">${esc(r.name)}${r.holder ? ' <span class="pill soft">ถือกอง</span>' : ''}${r.me ? ' (ฉัน)' : ''}</div>
-      <div class="lbl">ลง ${baht(r.inS)}${r.planS && r.inS < r.planS ? ' (ยังไม่โอน ' + baht(r.planS) + ')' : r.st === 'told' ? ' · แจ้งโอนแล้ว' : ''} · ใช้ ${baht(r.useS)}</div></div>
-      <div class="amt" style="color:${r.balS < 0 ? 'var(--bad)' : r.balS > 0 ? 'var(--ok)' : 'inherit'}">${r.balS > 0 ? 'เหลือ ' : r.balS < 0 ? 'ขาด ' : ''}${baht(Math.abs(r.balS))}</div></div>`;
+  const TOP = { wait: ['รอเติม', 'soft'], told: ['แจ้งเติมแล้ว', 'soft'], ok: ['เติมแล้ว ✓', 'ok'] }, REF = { wait: ['รอคืน', 'soft'], sent: ['โอนคืนแล้ว', 'soft'], got: ['ได้คืนแล้ว ✓', 'ok'] };
+  const row = r => {
+    const st = !open && r.topup ? TOP[r.topup] : !open && r.refund ? REF[r.refund] : null;
+    const owe = r.planS - r.inS - r.toldS;
+    const btn = open && H && !r.holder && r.toldS ? `<button type="button" class="btn sm ink" data-pok="${esc(r.k)}">ได้รับแล้ว</button>`
+      : open && H && !r.holder && owe > 0 ? `<button type="button" class="btn sm" data-pok="${esc(r.k)}" data-all="1">รับเงินสด</button>` : '';
+    return `<div class="item"><div class="mid"><div class="nm">${esc(r.name)}${r.holder ? ' <span class="pill soft">ถือกอง</span>' : ''}${r.me ? ' (ฉัน)' : ''}</div>
+      <div class="lbl">ลง ${baht(r.inS)}${r.toldS ? ' · แจ้งโอน ' + baht(r.toldS) + ' รอยืนยัน' : ''}${open && owe > 0 ? ' · ยังไม่โอน ' + baht(owe) : ''} · ใช้ ${baht(r.useS)}</div>
+      ${st ? `<span class="pill ${st[1]}" style="margin-top:4px;display:inline-block">${st[0]}</span>` : ''}</div>
+      ${btn || `<div class="amt" style="color:${r.balS < 0 ? 'var(--bad)' : r.balS > 0 ? 'var(--ok)' : 'inherit'}">${r.balS > 0 ? (open ? 'เหลือ ' : 'ได้คืน ') : r.balS < 0 ? (open ? 'ขาด ' : 'เติม ') : ''}${baht(Math.abs(r.balS))}</div>`}</div>`;
+  };
+  const mine = P.rows.find(r => r.me);
   $('#app').innerHTML = `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(P.name)}</h1><div class="sub">${esc(P.holder)}ถือเงินกอง${open ? '' : ' · ปิดกองแล้ว'}</div></div><span class="pill ${open ? 'ink' : 'soft'}">${open ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></div>
+    ${view.unsent ? `<div class="err">ยังไม่ได้ส่งการ์ดเข้ากลุ่ม <button type="button" class="lnk" id="pResend" style="padding:0">ส่งเข้ากลุ่ม</button></div>` : ''}
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(P.name)}</h1><div class="sub">${esc(P.holder)}ถือเงินกอง${P.equal ? ' · หารเท่ากันทั้งกอง' : ''}</div></div><span class="pill ${open ? 'ink' : 'soft'}">${open ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></div>
+    ${!open && mine && !mine.holder && mine.topup === 'wait' && P.topup ? `<button type="button" class="btn ink" id="pTop">เติมกอง ${baht(-mine.balS)} → ${esc(P.holder)}</button>` : ''}
     <div class="hero">
       <div class="sec"><div class="lbl">ลงกองแล้ว</div><div class="big">${baht(P.inS)}</div><div class="lbl">ใช้ไป ${baht(P.spentS)}</div></div>
       <div class="dark"><div class="lbl">${P.leftS >= 0 ? 'เงินกองเหลือ' : 'กองขาด'}</div><div class="big">${baht(Math.abs(P.leftS))}</div><div class="lbl">${P.bills.length} บิลจากกอง</div></div>
     </div>
     ${poolDash(P)}
-    <div class="sec list"><div class="sec-h">แต่ละคน (ลง − ใช้)${P.equal ? ' · หารเท่ากันทั้งกอง' : ''}</div>${P.rows.map(row).join('')}</div>
-    <div class="sec list"><div class="sec-h">บิลที่จ่ายจากกอง</div>${P.bills.map(b => { const c = catOf(b.cat); return `<div class="item"><span class="pl-ic" aria-hidden="true">${c ? c[1] : '🧾'}</span><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))}${c ? ' · ' + esc(c[2]) : ''}</div></div><div class="amt">${baht(b.totalS)}</div></div>`; }).join('') || '<div class="empty">ยังไม่มีบิลที่จ่ายจากกอง</div>'}</div>
-    ${!open && P.refunds.length ? `<div class="sec list"><div class="sec-h">คืนเงินจากกอง</div>${P.refunds.map(r => `<div class="item"><div class="mid"><div class="nm">${esc(P.holder)} คืน ${esc(r.name)}</div></div><span class="num h">${baht(r.amtS)}</span>${P.isHolder ? `<button type="button" class="btn sm ${r.done ? '' : 'ink'}" data-rf="${esc(r.k)}" data-done="${r.done ? 1 : ''}">${r.done ? 'คืนแล้ว ✓' : 'คืนแล้ว'}</button>` : `<span class="pill ${r.done ? 'ok' : 'soft'}">${r.done ? 'ได้คืนแล้ว' : 'รอคืน'}</span>`}</div>`).join('')}</div>` : ''}
-    <div class="lbl" style="padding:0 4px">${open ? 'ปิดกองเมื่อจบทริป: คนที่ใช้เกินจะได้บิล "เติมกอง" ส่วนคนที่เหลือ คนถือกองคืนให้ คนที่ยังไม่โอนลงกอง คิดรวมในยอดเติมให้เลย' : 'ปิดกองแล้ว ยอดเติมกองอยู่ในบิล "เติมกอง" ในหน้าแรก'}</div>`;
+    <div class="sec list"><div class="sec-h">แต่ละคน (ลง − ใช้)${P.rounds > 1 ? ' · เก็บเงิน ' + P.rounds + ' รอบ' : ''}</div>${P.rows.map(row).join('')}</div>
+    <div class="sec list"><div class="sec-h">บิลที่จ่ายจากกอง${open && H ? ' · แตะเพื่อแก้หรือลบ' : ''}</div>${P.bills.map(b => { const c = catOf(b.cat); const inner = `<span class="pl-ic" aria-hidden="true">${c ? c[1] : '🧾'}</span><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))}${c ? ' · ' + esc(c[2]) : ''}</div></div><div class="amt">${baht(b.totalS)}</div>`; return open && H ? `<button type="button" class="row-btn item" data-pb="${esc(b.id)}">${inner}</button>` : `<div class="item">${inner}</div>`; }).join('') || '<div class="empty">ยังไม่มีบิลที่จ่ายจากกอง</div>'}</div>
+    ${!open && P.refunds.length ? `<div class="sec list"><div class="sec-h">คืนเงินจากกอง</div>${P.refunds.map(r => `<div class="item"><div class="mid"><div class="nm">${esc(P.holder)} คืน ${esc(r.name)}${r.me ? ' (ฉัน)' : ''}</div><div class="lbl">${r.got ? 'ได้รับคืนแล้ว ✓' : r.done ? 'โอนคืนแล้ว รอ' + esc(r.name) + 'กดรับ' : 'ยังไม่ได้คืน'}</div></div><span class="num h">${baht(r.amtS)}</span>${r.me && !r.got ? `<button type="button" class="btn sm ink" data-rf="${esc(r.k)}">ได้รับคืนแล้ว</button>` : H && !r.got ? `<button type="button" class="btn sm ${r.done ? '' : 'ink'}" data-rf="${esc(r.k)}" data-done="${r.done ? 1 : ''}">${r.done ? 'โอนแล้ว ✓' : 'โอนคืนแล้ว'}</button>` : ''}</div>`).join('')}</div>` : ''}
+    <div class="sec list">
+      ${open && H ? '<button type="button" class="row-btn item" id="pAdd"><span class="lnk" style="padding:0">+ เพิ่มคน / เก็บเงินลงกองเพิ่ม</span></button>' : ''}
+      <button type="button" class="row-btn item" id="pCard"><span class="lnk" style="padding:0">ส่งการ์ดสรุปกองเข้ากลุ่ม</span></button>
+      ${open && H ? '<button type="button" class="row-btn item" id="pCancel"><span class="lnk" style="padding:0;color:var(--bad)">ยกเลิกกองนี้</span></button>' : ''}
+    </div>
+    <div class="lbl" style="padding:0 4px">${open ? (P.toldS ? 'มีคนแจ้งโอนลงกองที่ยังไม่ได้ยืนยัน กด "ได้รับแล้ว" ก่อนปิดกอง · ' : '') + 'ปิดกองเมื่อจบทริป: คนที่ใช้เกินจะได้บิล "เติมกอง" ส่วนคนที่เหลือ คนถือกองคืนให้ คนที่ยังไม่โอนลงกอง คิดรวมในยอดเติมให้เลย' : 'ปิดกองแล้ว ยอดของแต่ละคนเป็นยอดตอนปิด'}</div>`;
   const A = $('#app');
+  const reload = d => { view.pool = d.pool; drawPool(); };
   A.querySelectorAll('[data-rf]').forEach(b => b.onclick = async () => {
     busy(b, true);
-    try { const d = await call('hk_refund', { p: P.id, k: b.dataset.rf, undo: !!b.dataset.done }); view.pool = d.pool; drawPool(); } catch (e) { toast(e.message); busy(b, false); }
+    try { reload(await call('hk_refund', { p: P.id, k: b.dataset.rf, undo: !!b.dataset.done })); } catch (e) { toast(e.message); busy(b, false); }
   });
-  if (P.isHolder && open) {
+  A.querySelectorAll('[data-pok]').forEach(b => b.onclick = async () => {
+    if (b.dataset.all && !confirm('ได้รับเงินลงกองจากคนนี้ครบแล้ว (เงินสด/โอนแล้วไม่ได้กดแจ้ง)?')) return;
+    busy(b, true);
+    try { reload(await call('hk_pool_ok', { p: P.id, k: b.dataset.pok, all: !!b.dataset.all })); toast('ยืนยันแล้ว'); } catch (e) { toast(e.message); busy(b, false); }
+  });
+  A.querySelectorAll('[data-pb]').forEach(b => b.onclick = () => poolBillMenu(P, b.dataset.pb));
+  const tp = $('#pTop'); if (tp) tp.onclick = () => openBill(P.topup);
+  const rs = $('#pResend'); if (rs) rs.onclick = async () => { const ok = await postToChat(view.unsent); if (ok) { view.unsent = null; toast('ส่งแล้ว'); drawPool(); } else toast('ส่งได้เมื่อเปิดหน้านี้จากในกลุ่ม LINE'); };
+  $('#pCard').onclick = async () => {
+    try { const d = await call('hk_pool_card', { p: P.id }); const ok = await postToChat(d.msg); if (ok) toast('ส่งการ์ดเข้ากลุ่มแล้ว'); else { view.unsent = d.msg; toast('ส่งได้เมื่อเปิดหน้านี้จากในกลุ่ม LINE'); drawPool(); } } catch (e) { toast(e.message); }
+  };
+  const pa = $('#pAdd'); if (pa) pa.onclick = () => {
+    const inPool = new Set(P.members.map(m => m.uid));
+    const all = ((home.group && home.group.members) || []).map(m => ({ uid: m.uid, name: m.name, on: false, inS: '', inPool: inPool.has(m.uid) }));
+    P.members.forEach(m => { if (!all.some(x => x.uid === m.uid)) all.push({ uid: m.uid, name: m.name, on: false, inS: '', inPool: true }); });
+    all.sort((x, y) => (y.inPool ? 1 : 0) - (x.inPool ? 1 : 0));
+    ps = { add: P, each: '', my: '', people: all };
+    show({ name: 'poolNew' });
+  };
+  const pc = $('#pCancel'); if (pc) pc.onclick = async () => {
+    if (!confirm('ยกเลิกกอง ' + P.name + '?\nบิลลงกองจะถูกยกเลิก ใครโอนมาแล้วต้องคืนกันเอง (ยกเลิกได้เฉพาะกองที่ยังไม่มีบิลจ่ายจากกอง)')) return;
+    try { const d = await call('hk_pool_cancel', { p: P.id }); await postToChat(d.msg); await loadHome(); toast('ยกเลิกกองแล้ว'); show('home', true); } catch (e) { toast(e.message); }
+  };
+  if (H && open) {
     foot(`<button class="btn ink" type="button" id="pSpend">+ จ่ายบิลจากกองนี้</button><button class="btn" type="button" id="pClose">ปิดกองและคิดเงินคืน/เติม</button>`);
-    $('#pSpend').onclick = () => {
-      openCreate();
-      cs.pool = P.id; cs.poolName = P.name; cs.cat = 'trip';
-      const inPool = new Set(P.members.map(m => m.uid));
-      cs.people = cs.people.filter(p => p.me || inPool.has(p.uid));   // คนนอกกองไม่ใช้เงินกอง
-      cs.people.forEach(p => { p.on = true; });
-      cs.poolEq = !!P.equal; cs.poolN = cs.people.length;
-      if (cs.poolEq) cs.mode = 'equal';
-      drawCreate();
-    };
+    $('#pSpend').onclick = () => { openCreate(); poolCs(P); drawCreate(); };
     $('#pClose').onclick = async () => {
-      if (!confirm('ปิดกอง ' + P.name + '?\nหลังปิดจะจ่ายบิลจากกองเพิ่มไม่ได้ ระบบจะส่งยอดคืน/เติมของแต่ละคนเข้ากลุ่ม')) return;
+      if (P.toldS) { toast('ยังมีคนแจ้งโอนลงกองที่ยังไม่ได้ยืนยัน กด "ได้รับแล้ว" ก่อน'); return; }
+      if (!confirm('ปิดกอง ' + P.name + '?\nหลังปิดจะจ่าย แก้ หรือลบบิลจากกองไม่ได้ ระบบส่งการ์ดสรุปและบิลเติมกองเข้ากลุ่ม')) return;
       const b = $('#pClose'); busy(b, true);
-      try { const d = await call('hk_pool_close', { p: P.id }); await postToChat(d.msg); await loadHome(); view.pool = d.pool; toast('ปิดกองแล้ว'); drawPool(); }
+      try { const d = await call('hk_pool_close', { p: P.id }); const sent = await postToChat(d.msg); await loadHome(); view.pool = d.pool; view.unsent = sent ? null : d.msg; toast('ปิดกองแล้ว'); drawPool(); }
       catch (e) { toast(e.message); busy(b, false); }
     };
   }
+}
+/** ตั้งหน้าสร้างบิลให้เป็นบิลจากกอง: คนในบิล = คนในกองเท่านั้น */
+function poolCs(P) {
+  cs.pool = P.id; cs.poolName = P.name; if (!cs.edit) cs.cat = 'trip';
+  const inPool = new Set(P.members.map(m => m.uid));
+  const had = new Set(cs.people.filter(p => p.on).map(p => p.uid));
+  cs.people = cs.people.filter(p => p.me || inPool.has(p.uid));
+  P.members.forEach(m => { if (!cs.people.some(p => p.uid === m.uid)) cs.people.push({ key: m.uid, uid: m.uid, name: m.name, on: true, units: 2, custom: '' }); });
+  cs.people.forEach(p => { p.on = cs.edit ? (p.me || had.has(p.uid)) : true; });
+  cs.poolEq = !!P.equal; cs.poolN = P.members.length + 1;
+  if (cs.poolEq) { cs.mode = 'equal'; cs.people.forEach(p => { p.on = true; }); }
+}
+function poolBillMenu(P, id) {
+  dlg(`<h1 style="font-size:18px">บิลจากกอง</h1><div class="lbl">${esc((P.bills.find(b => b.id === id) || {}).title || '')}</div>
+    <button type="button" class="btn ink" id="pbEdit">แก้บิล</button><button type="button" class="btn" id="pbDel" style="color:var(--bad)">ลบบิลนี้ออกจากกอง</button><button type="button" class="btn" id="pbX">ปิด</button>`, d => {
+    $('#pbX').onclick = () => d.close();
+    $('#pbEdit').onclick = async () => {
+      d.close();
+      try { const r = await call('hk_bill', { b: id }); openCreate(r.bill); poolCs(P); drawCreate(); } catch (e) { toast(e.message); }
+    };
+    $('#pbDel').onclick = async () => {
+      if (!confirm('ลบบิลนี้ออกจากกอง? ยอดของทุกคนจะคิดใหม่')) return;
+      d.close();
+      try { const r = await call('hk_void', { b: id }); view.pool = r.pool; toast('ลบบิลแล้ว'); drawPool(); } catch (e) { toast(e.message); }
+    };
+  });
 }
 
 /* ===================== โหมดคนจ่ายก่อน: ติดตาม ===================== */
