@@ -28,8 +28,8 @@ const HK_BANKS = { kbank: 'กสิกรไทย', scb: 'ไทยพาณ�
 const HK_WEB = 'https://nitithon-web.github.io/maewkwak/';   // แอปเล็ก + รูปมาสคอต อยู่รีโปแมวกวัก
 const HK_FOLDER = 'แมวกวัก - หารกลุ่ม';
 // 🏷 หมวดของบิลในเว็บ (แอปเล็ก) → หมวดรายจ่ายส่วนของเจ้าของ · ตรงกับ SCATS ในแอป
-const HK_CAT_MONEY = { food: 'อาหาร', mart: 'อาหาร', sport: 'ออกกำลังกาย', karaoke: 'บันเทิง/ท่องเที่ยว', drink: 'เครื่องดื่ม/กาแฟ', ride: 'เดินทาง', trip: 'บันเทิง/ท่องเที่ยว', movie: 'บันเทิง/ท่องเที่ยว', home: 'ค่าน้ำไฟ/โทรศัพท์', gift: 'อื่นๆ' };
-const GRP_CMD = /^(แมวกวัก|น้องแมว|หาร|หารกัน|ค้าง|ใครค้าง|ใครยังไม่จ่าย|ยังไม่จ่าย|ทวง|#ทวง|ทวงหน่อย|จ่ายแล้ว|โอนแล้ว|ลบบิล|ยกเลิกบิล|พร้อมเพย์|พร้อมเพ|ชื่อ|วิธีใช้|ช่วย|help|เตือนทุกวัน|เปิดหาร|ปิดหาร|กองกลาง|กอง)/i;
+const HK_CAT_MONEY = { food: 'อาหาร', mart: 'อาหาร', sport: 'ออกกำลังกาย', play: 'บันเทิง/ท่องเที่ยว', karaoke: 'บันเทิง/ท่องเที่ยว', drink: 'เครื่องดื่ม/กาแฟ', ride: 'เดินทาง', trip: 'บันเทิง/ท่องเที่ยว', movie: 'บันเทิง/ท่องเที่ยว', sub: 'บันเทิง/ท่องเที่ยว', home: 'ค่าน้ำไฟ/โทรศัพท์', buy: 'ของใช้', gift: 'อื่นๆ' };
+const GRP_CMD = /^(แมวกวัก|น้องแมว|หาร|หารกัน|ค้าง|ใครค้าง|ใครยังไม่จ่าย|ยังไม่จ่าย|ทวง|#ทวง|ทวงหน่อย|จ่ายแล้ว|โอนแล้ว|ลบบิล|ยกเลิกบิล|พร้อมเพย์|พร้อมเพ|ชื่อ|วิธีใช้|ช่วย|help|เตือนทุกวัน|เปิดหาร|ปิดหาร|กองกลาง|กอง|สรุปกลุ่ม|สรุปเดือน)/i;
 
 const GRP_HELP = [
   '👥 หารกันในกลุ่ม',
@@ -41,6 +41,7 @@ const GRP_HELP = [
   '• หาร 1200 ชาบู @เอ @บี (+ชื่อ = คนนอกกลุ่ม, +ต้น@เอ = เอจ่ายแทนต้น)',
   '• ค้าง · ทวง · จ่ายแล้ว · ลบบิล',
   '• กองกลาง = สรุปยอดกองกลางของทริปที่เปิดอยู่',
+  '• สรุปกลุ่ม = เดือนนี้กลุ่มใช้ไปกับอะไร ใครออกก่อนเท่าไร',
   '• ชื่อ เอ็ม = ตั้งชื่อที่เพื่อนเห็น',
   '• พร้อมเพย์ 08xxxxxxxx = เบอร์รับเงินของเรา',
 ].join('\n');
@@ -66,7 +67,7 @@ function grpRows_(withPools) {   // 🏦 กองกลาง (kind:'pool') + �
   return sh.getRange(2, 1, last - 1, GRP_HEADERS.length).getDisplayValues().map(r => {
     if (!r[0]) return null;
     try { return grpUp_(Object.assign(JSON.parse(r[3] || '{}'), { id: r[0], gid: r[1], token: r[2] })); } catch (e) { return null; }
-  }).filter(b => b && (withPools === 'all' || (b.kind !== 'ghist' && (withPools || b.kind !== 'pool'))));
+  }).filter(b => b && (withPools === 'all' || !b.kind || (withPools && b.kind === 'pool')));   // แถวอื่น (ghist ประวัติ, grec บิลประจำเดือน) ไม่ใช่บิล
 }
 /** บิลรุ่นแรก (paid true/false) → สถานะ wait/told/ok */
 function grpUp_(b) {
@@ -245,6 +246,7 @@ function hkCardFlex_(b, label) {
           { type: 'text', text: label || 'บิล', size: 'xs', color: '#3a3f39', flex: 1 }, hkMascot_('34px', b.members.every(m => m.st !== 'wait') ? 'cheer' : '')] },
         { type: 'text', text: b.title || 'หารกัน', weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
         ...(b.parts ? [{ type: 'text', text: cut_(b.parts.map(pt => pt.name).join(' + '), 120), size: 'xs', color: HK_INK, wrap: true }] : []),
+        ...(b.fx ? [{ type: 'text', text: '💱 ' + b.fx.code + ' ' + (b.fx.origS / 100).toLocaleString('en-US') + ' · 1 ' + b.fx.code + ' = ' + b.fx.rate + ' บาท', size: 'xs', color: HK_MUTE, wrap: true }] : []),
         { type: 'text', text: b.payer.name + ' จ่ายก่อน · ยอดของแต่ละคนดูได้เฉพาะตัวเอง', size: 'xs', color: HK_MUTE, wrap: true },
         { type: 'separator', margin: 'md' },
         { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: rows.length ? rows : [{ type: 'text', text: 'ไม่มีใครต้องจ่าย', size: 'sm', color: HK_MUTE }] }] },
@@ -318,6 +320,7 @@ function grpHandle_(ev) {
     return reply_(ev.replyToken, 'ปิดหารกันในกลุ่มนี้แล้ว บิลเดิมยังเก็บไว้ เปิดใหม่พิมพ์ เปิดหาร');
   }
   if (/^(วิธีใช้|ช่วย|help)$/i.test(text)) return grpReplyMsgs_(ev.replyToken, [grpText_(GRP_HELP), hkSummonFlex_(gid)]);
+  if (/^(สรุปกลุ่ม|สรุปเดือน)$/.test(text)) return reply_(ev.replyToken, grpMonthText_(gid, Utilities.formatDate(new Date(), TZ, 'yyyy-MM')));
   if (/^(กองกลาง|กอง)$/.test(text)) {   // 🏦 สรุปกองกลางที่เปิดอยู่ในกลุ่มนี้
     const rows = grpRows_(true), pls = poolList_(gid, rows).filter(x => x.status === 'open');
     return grpReplyMsgs_(ev.replyToken, pls.length ? pls.slice(0, 5).map(x => poolFlex_(x, null, '', rows)) : [grpText_('ยังไม่มีกองกลางที่เปิดอยู่ในกลุ่มนี้\nสร้างได้ในหน้าหารกัน: พิมพ์ แมวกวัก แล้วกด ยอดของฉัน → + สร้างกองกลาง')]);
@@ -721,6 +724,7 @@ function hkApi_(body) {
   const me = hkAuth_(body.idt);
   const a = String(body.action);
   if (a === 'hk_read') return hkRead_(me, body);   // AI ช้า: นอกล็อก
+  if (a === 'hk_fx') return hkFxRate_(body.code);    // 💱 ดึงเรตวันนี้ (กดเอง) นอกล็อก
   const grp = body.g ? hkGroup_(body.g, me.uid) : null;
   if (a === 'hk_paid' && body.slip) {   // 🧾 อ่านสลิปนอกล็อก แล้วตัดสินในล็อก
     body.__bytes = Utilities.base64Decode(String(body.slip));
@@ -753,6 +757,10 @@ function hkApi_(body) {
       case 'hk_pool_ok': return poolOk_(me, poolGet_(body.p, grp), body);
       case 'hk_pool_cancel': return poolCancel_(me, poolGet_(body.p, grp));
       case 'hk_pool_card': return poolCard_(me, poolGet_(body.p, grp));
+      case 'hk_settle': return hkSettle_(me, grp, body);
+      case 'hk_rec_set': return hkRecSet_(me, grp, body);
+      case 'hk_gsum': { if (!grp) throw new Error('เปิดหน้านี้จากในกลุ่มก่อน'); const ym = /^\d{4}-\d{2}$/.test(String(body.ym || '')) ? body.ym : Utilities.formatDate(new Date(), TZ, 'yyyy-MM'); return { sum: grpMonthSum_(grp.gid, ym), group: grp.g.name || '' }; }
+      case 'hk_settle_ok': return hkSettleOk_(me, grp, body);
       case 'hk_refund': return poolRefund_(me, poolGet_(body.p, grp), body);
       case 'hk_void':   {
         const b = hkGet_(body.b, grp);
@@ -786,7 +794,7 @@ function hkView_(b, me) {
   const g = grpCfg_()[b.gid] || {};
   const row = m => ({ k: m.k, uid: m.uid || '', name: m.name, out: !!m.out, by: m.by ? m.by.name : '', byUid: m.by ? m.by.uid : '', byMe: !!(m.by && m.by.uid === me.uid), amtS: m.amtS, units: m.units || 0, items: m.items || [], st: m.st, at: m.at || '', slip: !!m.slip, auto: !!m.auto, via: m.via || '' });
   const v = { id: b.id, title: b.title, date: b.date, mode: b.mode || 'equal', unit: b.unit || 'ชม.', status: b.status, group: g.name || '', payer: b.payer.name, isPayer: isPayer, created: b.created, totalS: b.totalS,
-    cat: b.cat || '', rcpt: !!b.rcpt, selfUnits: !!b.selfUnits, canUnits: hkUnitsOpen_(b) && !isPayer && mine.some(m => !m.by), calc: b.calc || null };
+    cat: b.cat || '', rcpt: !!b.rcpt, selfUnits: !!b.selfUnits, canUnits: hkUnitsOpen_(b) && !isPayer && mine.some(m => !m.by), calc: b.calc || null, fx: b.fx || null };
   if (b.parts) v.parts = isPayer ? b.parts : b.parts.map(pt => ({ name: pt.name, cat: pt.cat, mode: pt.mode, unit: pt.unit, rateS: pt.rateS, qty: pt.qty,
     mineS: mine.reduce((a, m) => a + ((pt.sh || {})[m.k] || 0), 0), units: mine.reduce((a, m) => a + ((pt.u || {})[m.k] || 0), 0) })).filter(pt => pt.mineS > 0);
   if (isPayer) {
@@ -806,7 +814,7 @@ function hkView_(b, me) {
 function hkHome_(me, grp) {
   const cfg = grpCfg_(), today = todayStr_();
   const owe = [], get = [];
-  const all = grpRows_('all'), rows = all.filter(b => b.kind !== 'pool' && b.kind !== 'ghist');
+  const all = grpRows_('all'), rows = all.filter(b => !b.kind);
   rows.filter(b => b.status !== 'void' && b.status !== 'pool').forEach(b => {
     const gname = (cfg[b.gid] || {}).name || '';
     const old = daysBetween_(b.date, today) > 14;
@@ -831,6 +839,8 @@ function hkHome_(me, grp) {
     const seen = grp.g.seen || {};
     res.group = { name: grp.g.name || '', members: Object.keys(seen).filter(u => u !== me.uid).map(u => ({ uid: u, name: seen[u] })) };
     res.hist = grpHistList_(grp.gid, all);
+    res.recs = grpRecList_(grp.gid, me.uid, all);
+    res.net = grpNet_(grp.gid, me.uid, rows, seen).map(x => Object.assign(x, x.netS > 0 ? { pay: hkPayInfo_(x.uid) } : {}));
     res.pools = poolList_(grp.gid, all).filter(x => poolIn_(x, me.uid) && (x.status === 'open' || daysBetween_(String(x.closed || x.created).slice(0, 10), today) <= 14)).map(x => poolBrief_(x, me, rows));
   }
   return res;
@@ -915,7 +925,7 @@ function hkCreate_(me, grp, p, old) {
     if (pool.equal) p = Object.assign({}, p, poolEqualSplit_(pool, totalS));   // หารเท่ากันทั้งกอง: ไม่สนยอดรายคนที่ส่งมา
     if ((p.members || []).some(x => !x.uid || !pool.members.some(m => m.uid === String(x.uid)))) throw new Error('บิลจากกองเลือกได้เฉพาะคนในกอง (เพิ่มคนเข้ากองได้ในหน้ากองกลาง)');
   }
-  const mode = /^(equal|hours|items|custom)$/.test(p.mode) ? p.mode : 'custom';
+  const mode = /^(equal|share|hours|items|custom)$/.test(p.mode) ? p.mode : 'custom';
   const keys = {};
   const members = (Array.isArray(p.members) ? p.members : []).slice(0, 40).map(x => {
     const uid = String(x.uid || '');
@@ -958,10 +968,13 @@ function hkCreate_(me, grp, p, old) {
   });
   const parts = pool && pool.equal ? null : hkParts_(p, members, shareS, totalS);
   if (parts) { b.parts = parts; b.selfUnits = false; if (!b.cat) b.cat = parts.slice().sort((x, y) => y.totalS - x.totalS)[0].cat || ''; } else delete b.parts;
+  const fx = hkFx_(p.fx);
+  if (fx) { fx.origS = Math.max(0, Math.round(Number((p.fx || {}).origS) || 0)); b.fx = fx; } else delete b.fx;
   const rateS = Math.max(0, Math.round(Number(p.rateS) || 0));
   if (!parts && rateS) b.calc = { rateS: rateS, qty: Math.max(0, Number(p.qty) || 0), unit: String(p.calcUnit || p.unit || '').slice(0, 10) }; else delete b.calc;
   b.status = members.every(m => m.st === 'ok') ? 'done' : 'open';
   if (!old) { try { grpHistAdd_(b); } catch (e) { console.warn('ghist: ' + e); } }
+  if (!old && !pool && p.repeatDay) grpRecSave_(b, p.repeatDay);
   if (pool) {
     Object.assign(b, { status: 'pool', pool: pool.id, poolRole: 'spend', poolName: pool.name });
     b.members.forEach(m => { m.st = 'ok'; });
@@ -974,6 +987,26 @@ function hkCreate_(me, grp, p, old) {
   return { bill: hkView_(b, me), msg: hkCardFlex_(b, old ? 'แก้บิล' : 'บิลใหม่') };
 }
 
+/** 💱 สกุลเงินต่างประเทศ: เก็บแค่รหัส + เรต (ยอดในบิลเป็นบาทแล้วเสมอ) */
+function hkFx_(f) {
+  if (!f || !/^[A-Z]{3}$/.test(String(f.code || ''))) return null;
+  const rate = Number(f.rate);
+  return rate > 0 && rate < 10000 ? { code: String(f.code), rate: Math.round(rate * 1e9) / 1e9 } : null;
+}
+/** 💱 เรตวันนี้ 1 สกุล = กี่บาท (open.er-api.com ไม่ต้องใช้ key) · ดึงเฉพาะตอนกด · แคช 6 ชม. ต่อสกุล */
+function hkFxRate_(code) {
+  code = String(code || '').toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) throw new Error('สกุลเงินไม่ถูกต้อง');
+  const cache = CacheService.getScriptCache(), ck = 'fx:' + code, hit = cache.get(ck);
+  if (hit) return JSON.parse(hit);
+  let d;
+  try { d = JSON.parse(UrlFetchApp.fetch('https://open.er-api.com/v6/latest/' + code, { muteHttpExceptions: true }).getContentText()); } catch (e) { d = null; }
+  const thb = d && d.result === 'success' && d.rates && Number(d.rates.THB);
+  if (!(thb > 0)) throw new Error('ดึงเรตไม่ได้ตอนนี้ ใส่เรตเองไปก่อนได้');
+  const out = { code: code, rate: Math.round(thb * 1e6) / 1e6, at: String(d.time_last_update_utc || '').slice(5, 16) };
+  cache.put(ck, JSON.stringify(out), 21600);
+  return out;
+}
 /** 🧩 รายการย่อยในบิลเดียว (ค่าคอร์ท + ค่าลูก + ข้าว + ค่ารถ) แต่ละรายการมีหมวด/วิธีหารของตัวเอง
  * parts[]: { name, cat, mode, unit, rateS, qty, totalS, sh{k: ยอด} ('me' = คนจ่ายก่อน), u{k: จำนวน}, items[] } · ผลรวมทุกรายการต้องตรงยอดของแต่ละคน */
 function hkParts_(p, members, payerShareS, totalS) {
@@ -993,13 +1026,148 @@ function hkParts_(p, members, payerShareS, totalS) {
     Object.keys(x.u || {}).forEach(k => { if (Object.prototype.hasOwnProperty.call(keys, k)) u[k] = Math.round((Number(x.u[k]) || 0) * 2) / 2; });
     const t = Math.round(Number(x.totalS) || 0);
     if (t <= 0 || grpSum_(Object.keys(sh).map(k => ({ amtS: sh[k] }))) !== t) throw new Error('ยอดของรายการ "' + name + '" ยังไม่ครบ');
-    return { name: name, cat: Object.prototype.hasOwnProperty.call(HK_CAT_MONEY, String(x.cat || '')) ? String(x.cat) : '', mode: /^(equal|hours|items|custom)$/.test(x.mode) ? x.mode : 'custom',
+    return { name: name, cat: Object.prototype.hasOwnProperty.call(HK_CAT_MONEY, String(x.cat || '')) ? String(x.cat) : '', mode: /^(equal|share|hours|items|custom)$/.test(x.mode) ? x.mode : 'custom',
       unit: String(x.unit || '').slice(0, 10), rateS: Math.max(0, Math.round(Number(x.rateS) || 0)), qty: Math.max(0, Number(x.qty) || 0), totalS: t, sh: sh, u: u,
       items: (Array.isArray(x.items) ? x.items : []).slice(0, 40).map(it => ({ name: String(it.name || '').slice(0, 60), priceS: Math.round(Number(it.priceS) || 0), who: (it.who || []).map(String).filter(k => Object.prototype.hasOwnProperty.call(keys, k)).slice(0, 40) })) };
   });
   if (grpSum_(parts.map(x => ({ amtS: x.totalS }))) !== totalS) throw new Error('ยอดทุกรายการรวมกันไม่ตรงยอดบิล');
   if (keys.me !== payerShareS || members.some(m => keys[m.k] !== m.amtS)) throw new Error('ยอดของแต่ละคนไม่ตรงกับผลรวมของรายการ ลองกดส่งใหม่');
   return parts;
+}
+
+/* ===================== 🔁 รวมยอดกับแต่ละคนในกลุ่ม (หักลบกัน โอนทีเดียว) =====================
+ * ดูเฉพาะบิลปกติที่ยังเปิดในกลุ่มนี้ (ไม่รวมบิลของกองกลาง) · คนที่กดหักลบ: แถวที่ตัวเองค้าง → แจ้งจ่ายแล้ว (told, via net) รออีกฝ่ายยืนยัน · แถวที่อีกฝ่ายค้างตัวเอง → ได้รับแล้ว (ok) */
+function grpNetBills_(gid, rows) { return (rows || grpRows_()).filter(b => b.gid === gid && b.status === 'open' && !b.poolRole && !b.kind); }
+function grpNet_(gid, uid, rows, seen) {
+  const per = {};
+  const P = (u, name) => per[u] = per[u] || { uid: u, name: (seen || {})[u] || name, iOweS: 0, theyOweS: 0, toldInS: 0, toldOutS: 0, netWaitS: -1, bills: [] };
+  grpNetBills_(gid, rows).forEach(b => b.members.forEach(m => {
+    const r = grpResp_(m);
+    if (!r) return;
+    if (r === uid && b.payer.uid !== uid) {
+      const x = P(b.payer.uid, b.payer.name);
+      if (m.st === 'wait') { x.iOweS += m.amtS; x.bills.push({ id: b.id, title: b.title, date: b.date, dir: 'out', amtS: m.amtS }); } else if (m.st === 'told') x.toldOutS += m.amtS;
+    } else if (b.payer.uid === uid && r !== uid) {
+      const x = P(r, m.by ? m.by.name : m.name);
+      if (m.st === 'wait') { x.theyOweS += m.amtS; x.bills.push({ id: b.id, title: b.title, date: b.date, dir: 'in', amtS: m.amtS }); }
+      else if (m.st === 'told') { x.toldInS += m.amtS; if (m.via === 'net') x.netWaitS = Math.max(x.netWaitS, m.netAmt || 0); }   // หักลบแล้ว: ยอดที่โอนจริง
+    }
+  }));
+  return Object.values(per).map(x => Object.assign(x, { netS: x.iOweS - x.theyOweS, n: new Set(x.bills.map(b => b.id)).size }))
+    .filter(x => x.iOweS || x.theyOweS || x.toldInS);
+}
+function hkSettle_(me, grp, p) {
+  if (!grp) throw new Error('เปิดหน้านี้จากในกลุ่มก่อน');
+  const x = String(p.with || '');
+  if (!x || x === me.uid) throw new Error('เลือกคนที่จะหักลบยอดด้วย');
+  const xName = (grp.g.seen || {})[x] || 'เพื่อน';
+  let outS = 0, inS = 0, n = 0;
+  grpNetBills_(grp.gid).forEach(b => {
+    const out = b.payer.uid === x ? b.members.filter(m => grpResp_(m) === me.uid && m.st === 'wait') : [];
+    const inn = b.payer.uid === me.uid ? b.members.filter(m => grpResp_(m) === x && m.st !== 'ok') : [];
+    if (!out.length && !inn.length) return;
+    n++;
+    if (out.length) outS += grpSum_(out);
+    if (inn.length) inS += grpSum_(inn);
+  });
+  if (!n) throw new Error('ไม่มียอดค้างกับ ' + xName + ' แล้ว');
+  const net = outS - inS;
+  grpNetBills_(grp.gid).forEach(b => {   // บันทึกทีหลัง จะได้รู้ยอดสุทธิ (ใส่ไว้ในแถวที่รออีกฝ่ายยืนยัน)
+    const out = b.payer.uid === x ? b.members.filter(m => grpResp_(m) === me.uid && m.st === 'wait') : [];
+    const inn = b.payer.uid === me.uid ? b.members.filter(m => grpResp_(m) === x && m.st !== 'ok') : [];
+    if (out.length) { out.forEach(m => { m.via = 'net'; m.netAmt = Math.max(0, net); }); grpSetSt_(b, out, 'told'); }
+    if (inn.length) { inn.forEach(m => { if (m.st === 'wait') m.via = 'net'; }); grpSetSt_(b, inn, 'ok'); }
+  });
+  const line = net > 0 ? me.disp + ' โอนให้ ' + xName + ' ' + grpB_(net) + ' (' + xName + ' กดยืนยันได้รับในเว็บ)' : net < 0 ? xName + ' โอนให้ ' + me.disp + ' ' + grpB_(-net) + ' แล้ว' : 'หักกันพอดี ไม่ต้องโอน';
+  return { done: true, netS: net, msg: grpText_('🔁 ' + me.disp + ' กับ ' + xName + ' หักลบยอดกันแล้ว ' + n + ' บิล\n' + line) };
+}
+function hkSettleOk_(me, grp, p) {
+  if (!grp) throw new Error('เปิดหน้านี้จากในกลุ่มก่อน');
+  const x = String(p.with || '');
+  let n = 0;
+  grpNetBills_(grp.gid).forEach(b => {
+    if (b.payer.uid !== me.uid) return;
+    const list = b.members.filter(m => grpResp_(m) === x && m.st === 'told');
+    if (list.length) { grpSetSt_(b, list, 'ok'); n++; }
+  });
+  if (!n) throw new Error('ไม่มียอดที่รอยืนยัน');
+  return { done: true };
+}
+
+/* ===================== 🔁 บิลประจำเดือนในกลุ่ม =====================
+ * แถว kind:'grec' = ต้นแบบ (สร้างตอนติ๊ก "ทำซ้ำทุกเดือน") · checkReminders → grpRecurring_: ตั้งแต่วันที่ day หลัง 09:00 สร้างบิลเดือนนั้น + ส่งการ์ดเข้ากลุ่ม (เดือนละครั้ง ดู last) */
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+function grpRecSave_(b, day) {
+  const x = { id: 'gr' + Utilities.getUuid().replace(/-/g, '').slice(0, 20), gid: b.gid, token: '', kind: 'grec', on: true, day: Math.min(28, Math.max(1, Math.round(Number(day) || 1))),
+    last: String(b.date).slice(0, 7), created: stamp_(), payer: { uid: b.payer.uid, name: b.payer.name },
+    src: { title: b.title, cat: b.cat || '', mode: b.mode, unit: b.unit, totalS: b.totalS, payerIn: b.payerIn, payerShareS: b.payer.shareS || 0, payerUnits: b.payer.units || 0,
+      members: b.members.map(m => ({ k: m.k, uid: m.uid, name: m.name, out: m.out, by: m.by, amtS: m.amtS, units: m.units || 0, items: [] })), parts: b.parts || null, calc: b.calc || null } };
+  grpSave_(x);
+  b.rec = x.id;
+  return x;
+}
+function grpRecurring_() {
+  const now = new Date();
+  if (Number(Utilities.formatDate(now, TZ, 'HH')) < 9) return;
+  const ym = Utilities.formatDate(now, TZ, 'yyyy-MM'), d = Number(Utilities.formatDate(now, TZ, 'dd')), cfg = grpCfg_();
+  grpRows_('all').filter(x => x.kind === 'grec' && x.on && x.last !== ym && d >= x.day).forEach(x => {
+    const g = cfg[x.gid];
+    if (!g || !g.on) return;
+    try {
+      const s = x.src;
+      const b = { id: Utilities.getUuid().replace(/-/g, ''), gid: x.gid, token: grpTok_(), v: 2, via: 'rec', rec: x.id, created: stamp_(), status: 'open',
+        title: s.title + ' ' + TH_MON[Number(ym.slice(5)) - 1], date: todayStr_(), totalS: s.totalS, mode: s.mode, unit: s.unit, items: [], payerIn: s.payerIn, cat: s.cat, rcpt: '',
+        payer: { uid: x.payer.uid, name: x.payer.name, shareS: s.payerShareS, units: s.payerUnits, items: [] },
+        members: s.members.map(m => Object.assign({}, m, { st: 'wait', at: '', slip: '' })), edited: '' };
+      if (s.parts) b.parts = s.parts;
+      if (s.calc) b.calc = s.calc;
+      try { b.owe = grpOweCreate_(b); } catch (e) { console.warn('grpOwe: ' + e); }
+      grpSave_(b);
+      x.last = ym; grpSave_(x);
+      LINE_SENDER = HK_SENDER;
+      line_('push', { to: x.gid, messages: [hkCardFlex_(b, '🔁 บิลประจำเดือน')] });
+    } catch (e) { console.warn('grpRec ' + x.id + ': ' + e); }
+  });
+  LINE_SENDER = null;
+}
+function grpRecList_(gid, uid, rows) {
+  return (rows || grpRows_('all')).filter(x => x.kind === 'grec' && x.gid === gid && !x.deleted && (x.payer.uid === uid || x.src.members.some(m => grpResp_(m) === uid)))
+    .map(x => ({ id: x.id, title: x.src.title, cat: x.src.cat, day: x.day, on: !!x.on, totalS: x.src.totalS, payer: x.payer.name, mine: x.payer.uid === uid, n: x.src.members.length + (x.src.payerIn ? 1 : 0) }));
+}
+function hkRecSet_(me, grp, p) {
+  const x = grpRows_('all').find(r => r.kind === 'grec' && r.id === String(p.id || ''));
+  if (!x || x.deleted || (grp && x.gid !== grp.gid)) throw new Error('ไม่พบบิลประจำเดือนนี้');
+  if (x.payer.uid !== me.uid) throw new Error('แก้ได้เฉพาะ ' + x.payer.name + ' (คนจ่ายก่อน)');
+  if (p.del) { x.deleted = true; x.on = false; }
+  else { if (p.on != null) x.on = !!p.on; if (p.day) x.day = Math.min(28, Math.max(1, Math.round(Number(p.day)))); }
+  grpSave_(x);
+  return { recs: grpRecList_(x.gid, me.uid) };
+}
+
+/* ===================== 📊 สรุปของกลุ่มรายเดือน (ยอดรวม แยกหมวด และใครออกก่อน · ไม่บอกยอดของแต่ละคน) ===================== */
+const HK_CAT_NAME = { food: '🍜 อาหาร', mart: '🏪 เซเว่น', sport: '🏸 กีฬา', play: '🎳 เล่นด้วยกัน', karaoke: '🎤 คาราโอเกะ', drink: '🍻 ปาร์ตี้', ride: '🚕 เดินทาง', trip: '🧳 ทริป', movie: '🎬 หนัง/คอนเสิร์ต', sub: '📺 สมาชิกรายเดือน', home: '🏠 บ้าน', buy: '🛍 ซื้อรวม', gift: '🎁 ของขวัญ' };
+function grpMonthSum_(gid, ym, rows) {
+  const bills = (rows || grpRows_()).filter(b => b.gid === gid && !b.kind && b.status !== 'void' && b.poolRole !== 'in' && b.poolRole !== 'topup' && String(b.date).slice(0, 7) === ym);
+  const cats = {}, payers = {};
+  let waitS = 0;
+  bills.forEach(b => {
+    (b.parts || [{ cat: b.cat, totalS: b.totalS }]).forEach(pt => { const k = pt.cat || ''; cats[k] = (cats[k] || 0) + pt.totalS; });
+    const who = b.poolRole === 'spend' ? '🏦 กองกลาง' + (b.poolName ? ' ' + b.poolName : '') : b.payer.name;
+    payers[who] = (payers[who] || 0) + b.totalS;
+    waitS += grpSum_(b.members.filter(m => m.st === 'wait'));
+  });
+  const sort = o => Object.keys(o).map(k => [k, o[k]]).sort((a, b) => b[1] - a[1]);
+  return { ym: ym, n: bills.length, totalS: grpSum_(bills.map(b => ({ amtS: b.totalS }))), waitS: waitS, cats: sort(cats), payers: sort(payers),
+    days: sort(bills.reduce((o, b) => { o[b.date] = (o[b.date] || 0) + b.totalS; return o; }, {})).sort((a, b) => a[0] < b[0] ? -1 : 1) };
+}
+function grpMonthText_(gid, ym) {
+  const m = grpMonthSum_(gid, ym), g = grpCfg_()[gid] || {};
+  const label = TH_MON[Number(ym.slice(5)) - 1] + ' ' + (Number(ym.slice(0, 4)) + 543);
+  if (!m.n) return '📊 ' + label + ' กลุ่มนี้ยังไม่มีบิล';
+  return ['📊 สรุปกลุ่ม' + (g.name ? ' ' + g.name : '') + ' · ' + label, 'รวม ' + grpB_(m.totalS) + ' · ' + m.n + ' บิล', '']
+    .concat(m.cats.map(c => (HK_CAT_NAME[c[0]] || '🧾 อื่นๆ') + ' ' + grpB_(c[1])))
+    .concat(['', 'ใครออกก่อน'], m.payers.map(p => '• ' + p[0] + ' ' + grpB_(p[1])))
+    .concat(m.waitS ? ['', 'ยังค้างจ่ายกันอยู่ ' + grpB_(m.waitS) + ' · แตะ ยอดของฉัน ดูของตัวเอง'] : ['', '🎉 จ่ายกันครบแล้ว']).join('\n');
 }
 
 /* ===================== 🕘 ประวัติรายการของกลุ่ม (ใช้บ่อย / ล่าสุด) =====================
@@ -1115,6 +1283,20 @@ function poolFlex_(pool, spent, how, rows) {
       footer: { type: 'box', layout: 'vertical', contents: [
         { type: 'button', style: 'primary', color: HK_INK, height: 'sm', action: { type: 'uri', label: closed ? 'ดูยอดของฉัน (เติม/คืน)' : 'ดูสรุปกองกลาง', uri: hkUrl_(tok, '', 'p=' + pool.id) } }] } } };
 }
+/** 🏦 กองกลางของกลุ่ม LINE ที่เจ้าของถือหรืออยู่ในกอง (หน้าหารกันในแอป) · เปิดอยู่ หรือปิดไม่เกิน 14 วัน */
+function grpOwnerPools_() {
+  const owner = props.getProperty('LINE_USER_ID');
+  if (!owner) return [];
+  const all = grpRows_('all'), rows = all.filter(b => !b.kind), cfg = grpCfg_(), today = todayStr_();
+  return all.filter(x => x.kind === 'pool' && x.status !== 'void').map(poolNorm_).filter(x => poolIn_(x, owner) && (x.status === 'open' || daysBetween_(String(x.closed || x.created).slice(0, 10), today) <= 14))
+    .map(x => {
+      const c = poolNums_(x, rows), mine = c.list.find(y => y.k === owner) || {};
+      const ref = (x.refunds || []).find(r => r.k === owner);
+      return { id: x.id, name: x.name, group: (cfg[x.gid] || {}).name || '', holder: x.holder.name, isHolder: x.holder.uid === owner, status: x.status, equal: !!x.equal,
+        inS: c.inS, spentS: c.spentS, leftS: c.leftS, n: c.list.length, bills: c.bills.length, myBalS: mine.balS || 0, myUseS: mine.useS || 0, refund: ref ? (ref.got ? 'got' : ref.done ? 'sent' : 'wait') : '',
+        url: hkUrl_(grpEnsureTok_(x.gid), '', 'p=' + x.id) };
+    });
+}
 function poolBrief_(pool, me, rows) {
   const c = poolNums_(pool, rows), mine = c.list.find(x => x.k === me.uid);
   return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: pool.holder.uid === me.uid, status: pool.status, leftS: c.leftS, myBalS: mine ? mine.balS : 0 };
@@ -1128,7 +1310,7 @@ function poolView_(pool, me, rows) {
   if (top) top.members.forEach(m => { topSt[grpResp_(m) || m.k] = m.st; });
   const ref = {};
   (pool.refunds || []).forEach(r => { ref[r.k] = r; });
-  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, equal: !!pool.equal, topup: pool.topup || '',
+  return { id: pool.id, name: pool.name, holder: pool.holder.name, isHolder: isHolder, status: pool.status, equal: !!pool.equal, fx: pool.fx || null, topup: pool.topup || '',
     inS: c.inS, planS: c.planS, toldS: open ? c.toldS : 0, spentS: c.spentS, leftS: c.leftS, bills: c.bills, rounds: pool.contribs.length,
     rows: c.list.map(x => ({ k: x.k, name: x.name, me: x.k === me.uid, holder: x.k === pool.holder.uid, planS: x.planS, inS: x.inS, toldS: open ? x.toldS || 0 : 0, useS: x.useS, balS: x.balS,
       topup: topSt[x.k] || '', refund: ref[x.k] ? (ref[x.k].got ? 'got' : ref[x.k].done ? 'sent' : 'wait') : '' })),
@@ -1165,7 +1347,7 @@ function poolNew_(me, grp, p) {
   const members = poolPicks_(grp, me, p.members);
   if (!members.length) throw new Error('เลือกคนที่ลงกองอย่างน้อย 1 คน');
   const pool = { id: Utilities.getUuid().replace(/-/g, ''), gid: grp.gid, token: grpTok_(), kind: 'pool', v: 2, name: name, created: stamp_(), status: 'open',
-    holder: { uid: me.uid, name: me.disp }, members: members.map(m => ({ k: m.k, uid: m.uid, name: m.name })), equal: !!p.equal, contribs: [], refunds: [] };
+    holder: { uid: me.uid, name: me.disp }, members: members.map(m => ({ k: m.k, uid: m.uid, name: m.name })), equal: !!p.equal, fx: hkFx_(p.fx), contribs: [], refunds: [] };
   const msg = poolRound_(me, pool, Math.max(0, Math.round(Number(p.myInS) || 0)), members.filter(m => m.amtS > 0), 'ลงกอง');
   grpSave_(pool);
   return { pool: poolView_(pool, me), msg: msg };

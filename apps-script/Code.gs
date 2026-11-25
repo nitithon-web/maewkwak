@@ -5,7 +5,7 @@
  * - สรุปเงินตอนเช้า + เตือนหารในกลุ่ม + สำรองชีตทุกสัปดาห์
  */
 
-const BACKEND_VER = 14;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
+const BACKEND_VER = 16;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
              // ดึงประชุมล่วงหน้ากี่วัน
 // ปฏิทินที่ดึงผ่านสะพาน (Bridge.gs ในบัญชีอื่น) ตั้งค่าใน Script properties: BRIDGE_URL, BRIDGE_KEY
 const BRIDGE_LABEL = 'พี่วุฒิ';
@@ -125,6 +125,7 @@ function doPost(e) {
       case 'vault_delete': vaultDelete_(body.id, body.space); return json_({ ok: true });
       case 'vault_reset':  return json_({ ok: true, removed: vaultReset_(body.space) });
       case 'money_list':   return json_({ ok: true, items: moneyAll_() });
+      case 'money_gpools': return json_({ ok: true, pools: grpOwnerPools_() });   // 🏦 กองกลางในกลุ่ม LINE ที่เจ้าของอยู่ (ดูจากแอป)
       case 'backup_now':   return json_({ ok: true, id: weeklyBackup_(true) });
       case 'money_cfg':    { const c = moneyCfg_(); return json_({ ok: true, budgets: c.budgets, recur: c.recur, pp: c.pp || '', goals: c.goals || [] }); }
       case 'status':       return json_({ ok: true, ...statusInfo_() });
@@ -230,6 +231,7 @@ function checkReminders() {
     try { grpDaily_(); } catch (e) { console.warn('grpDaily: ' + e); }        // 👥 เตือนคนที่ยังไม่จ่ายในกลุ่ม 10:00
     try { weeklyBackup_(); } catch (e) { console.warn('backup: ' + e); }     // 💾 สำรองชีตทุกวันอาทิตย์
     try { splitMonthly_(); } catch (e) { console.warn('splitMonthly: ' + e); }  // 🗓 ชุดที่หารทุกเดือน
+    try { grpRecurring_(); } catch (e) { console.warn('grpRec: ' + e); }      // 🔁 บิลประจำเดือนในกลุ่ม LINE
   } finally {
     lock.releaseLock();
   }
@@ -452,6 +454,24 @@ function weeklyBackup_(force) {
 }
 
 /* ===================== 🩺 สถานะระบบ (บอกแค่ว่าตั้งค่าแล้วหรือยัง ไม่ส่งค่าลับออกไป) ===================== */
+/** 📊 โควตา/พื้นที่ของหลังบ้าน (ดูในแอป: ตั้งค่า → สถานะระบบและโควตา) */
+function statusQuota_(P) {
+  const o = {};
+  try { o.drive = { used: DriveApp.getStorageUsed(), limit: DriveApp.getStorageLimit() }; } catch (e) {}
+  try {
+    const id = P.SHEET_ID, ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+    o.cells = ss.getSheets().reduce((a, sh) => a + sh.getMaxRows() * sh.getMaxColumns(), 0);
+  } catch (e) {}
+  o.props = Object.keys(P).reduce((a, k) => a + k.length + String(P[k]).length, 0);
+  o.groupsCfg = String(P.LINE_GROUPS || '').length;
+  try {
+    const c = grpCfg_(), all = grpRows_('all');
+    o.groups = { on: Object.keys(c).filter(g => c[g].on).length, all: Object.keys(c).length,
+      pools: all.filter(x => x.kind === 'pool' && x.status === 'open').length, recs: all.filter(x => x.kind === 'grec' && x.on && !x.deleted).length,
+      open: all.filter(x => !x.kind && x.status === 'open').length };
+  } catch (e) {}
+  return o;
+}
 function statusInfo_() {
   const P = props.getProperties(), has = k => !!(P[k] && String(P[k]).trim() && String(P[k]).indexOf('ใส่') !== 0);
   let triggers = [];
@@ -471,6 +491,6 @@ function statusInfo_() {
     ai: (() => { const o = { key: has('GEMINI_API_KEY'), model: P.GEMINI_MODEL || AI_MODELS[0] }; try { o.health = aiHealthInfo_(); } catch (e) {} try { o.samples = aiSamples_().length; } catch (e) {} return o; })(),
     lastTick: P.LAST_TICK || '', weeklySent: P.WEEKLY_SENT || '', backup: P.BACKUP_SENT || '',
     vault: { personal: has('VAULT2_SALT') },
-    triggers: triggers, rows: counts,
+    triggers: triggers, rows: counts, ...statusQuota_(P),
   };
 }
