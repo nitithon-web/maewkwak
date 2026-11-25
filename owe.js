@@ -632,7 +632,7 @@ function paintSplit() {
         ${b.aiCheck && !b.aiCheck.ok ? `<small class="s-warn">⚠️ เมนูที่ AI อ่านรวมกันแล้วไม่ตรงยอด (ต่าง ${bahtS(toS(Math.abs(b.aiCheck.diff)))}) เช็กเมนูกับใบเสร็จก่อนบันทึก</small>` : ''}
         ${b.file && b.file.id ? `<button type="button" class="link-btn s-flag" ${b.flagged ? 'disabled' : ''}>${b.flagged ? '✓ ส่งให้ทดสอบแล้ว' : 'AI อ่านผิด?'}</button>` : ''}</div>
       <label>ใครจ่ายไปก่อน <select class="s-payer">${sp.people.map(p => `<option value="${esc(p)}" ${p === b.payer ? 'selected' : ''}>${esc(who(p))}</option>`).join('')}</select></label>
-      <div class="seg s-method">${[['equal', 'เท่ากัน'], ['custom', 'ระบุเอง'], ['menu', 'ตามเมนู'], ['unit', 'ชม./ชิ้น']].map(([v, t]) => `<button type="button" data-v="${v}" class="${b.method === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="seg s-method">${[['equal', 'เท่ากัน'], ['menu', 'ตามเมนู'], ['unit', 'ชม./ชิ้น'], ['custom', 'รายคน']].map(([v, t]) => `<button type="button" data-v="${v}" class="${b.method === v ? 'on' : ''}">${t}</button>`).join('')}</div>
       <div class="s-sug when-chips wrap"></div>
       <div class="s-body"></div>`;
     const body = el.querySelector('.s-body');
