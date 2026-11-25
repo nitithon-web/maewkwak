@@ -83,7 +83,7 @@ function draw() {
   $('#back').classList.toggle('hide', !stack.length);
   $('#foot').classList.add('hide');
   scrollTo(0, 0);
-  ({ home: drawHome, create: drawCreate, track: drawTrack, pay: drawPay, poolNew: drawPoolNew, pool: drawPool }[view.name] || drawHome)();
+  ({ gsum: drawGsum, net: drawNet, home: drawHome, create: drawCreate, track: drawTrack, pay: drawPay, poolNew: drawPoolNew, pool: drawPool }[view.name] || drawHome)();
 }
 function foot(html) { $('#footIn').innerHTML = html; $('#foot').classList.remove('hide'); }
 
@@ -103,18 +103,112 @@ function drawHome() {
       <div class="sec"><div class="lbl">ต้องจ่าย</div><div class="big">${baht(due)}</div><div class="lbl">${home.owe.filter(x => x.st === 'wait').length} บิล</div></div>
       <div class="dark"><div class="lbl">รอรับคืน</div><div class="big">${baht(get)}</div><div class="lbl">${home.get.filter(x => x.leftS).length} บิล · ฉันจ่ายก่อน</div></div>
     </div>
+    ${netBlock()}
     <div class="sec list"><div class="sec-h">ต้องจ่าย</div>${oweRows || '<div class="empty">ไม่มียอดที่ต้องจ่าย</div>'}</div>
     <div class="sec list"><div class="sec-h">รอรับคืน (ฉันจ่ายก่อน)</div>${getRows || '<div class="empty">ยังไม่มีบิลที่คุณจ่ายก่อน</div>'}</div>
+    ${home.group ? `<button class="row-btn item" type="button" id="gSum" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;text-align:left;font:inherit;color:inherit"><span style="font-size:22px" aria-hidden="true">📊</span><div class="mid"><div class="nm">สรุปกลุ่มเดือนนี้</div><div class="lbl">ใช้ไปกับอะไร ใครออกก่อนเท่าไร</div></div></button>` : ''}
+    ${(home.recs || []).length ? `<div class="sec list"><div class="sec-h">🔁 บิลประจำเดือนในกลุ่มนี้</div>${home.recs.map(x => { const c = catOf(x.cat); return `<div class="item"><span class="pl-ic" aria-hidden="true">${c ? c[1] : '🔁'}</span><div class="mid"><div class="nm">${esc(x.title)}${x.on ? '' : ' <span class="pill soft">หยุดไว้</span>'}</div><div class="lbl">ทุกวันที่ ${x.day} · ${baht(x.totalS)} · ${x.n} คน · ${esc(x.payer)}จ่ายก่อน</div></div>${x.mine ? `<button type="button" class="btn sm" data-rec="${esc(x.id)}">จัดการ</button>` : ''}</div>`; }).join('')}</div>` : ''}
     ${home.group ? `<div class="sec list"><div class="sec-h">🏦 กองกลางในกลุ่มนี้</div>${(home.pools || []).map(x => `<button class="row-btn item" type="button" data-pool="${esc(x.id)}"><div class="mid"><div class="nm">${esc(x.name)}${x.status === 'closed' ? ' <span class="pill soft">ปิดแล้ว</span>' : ''}</div><div class="lbl">${esc(x.holder)}ถือกอง${x.myBalS ? ' · ของฉัน' + (x.myBalS > 0 ? 'เหลือ ' : 'ใช้เกิน ') + baht(Math.abs(x.myBalS)) : ''}</div></div><div class="amt">${baht(x.leftS)}</div></button>`).join('') || '<div class="empty">ยังไม่มีกองกลาง</div>'}<button class="row-btn item" type="button" id="newPool"><span class="lnk" style="padding:0">+ สร้างกองกลาง (ทุกคนลงเงินก่อน แล้วจ่ายจากกอง)</span></button></div>` : ''}
     ${home.me.ppSet || home.me.qr || home.me.qrImg || home.me.bank ? '' : `<button class="row-btn sec item" type="button" id="setPay"><div class="mid"><div class="nm">ตั้งช่องทางรับเงิน</div><div class="lbl">อัปรูป QR ใส่พร้อมเพย์ หรือเลขบัญชีธนาคาร เพื่อนจะได้จ่ายง่าย</div></div><span class="lnk">ตั้งเลย</span></button>`}`;
   $('#app').querySelectorAll('[data-bill]').forEach(b => b.onclick = () => openBill(b.dataset.bill));
   $('#app').querySelectorAll('[data-pool]').forEach(b => b.onclick = () => openPool(b.dataset.pool));
+  const gs = $('#gSum'); if (gs) gs.onclick = () => openGsum();
+  $('#app').querySelectorAll('[data-rec]').forEach(b => b.onclick = () => recMenu((home.recs || []).find(x => x.id === b.dataset.rec)));
+  $('#app').querySelectorAll('[data-net]').forEach(b => b.onclick = () => show({ name: 'net', x: (home.net || []).find(x => x.uid === b.dataset.net) }));
   const np = $('#newPool'); if (np) np.onclick = () => { ps = { name: '', each: '', my: '', equal: true, people: ((home.group && home.group.members) || []).map(m => ({ uid: m.uid, name: m.name, on: false, inS: '' })) }; show({ name: 'poolNew' }); };
   const sp = $('#setPay'); if (sp) sp.onclick = () => openMe();
   foot(home.group ? '<button class="btn ink" type="button" id="newBill">สร้างบิลใหม่ (ฉันจ่ายก่อน)</button>' : '<div class="lbl" style="text-align:center">สร้างบิลได้จากในกลุ่ม: พิมพ์ หาร แล้วกดสร้างบิลใหม่</div>');
   const nb = $('#newBill'); if (nb) nb.onclick = () => openCreate();
 }
 
+/* ---------- 🔁 บิลประจำเดือน + 📊 สรุปกลุ่ม ---------- */
+function recMenu(x) {
+  if (!x) return;
+  dlg(`<h1 style="font-size:18px">🔁 ${esc(x.title)}</h1><div class="lbl">ทุกวันที่ ${x.day} ของเดือน · ${baht(x.totalS)}</div>
+    <label class="field"><span class="lbl">วันที่สร้างบิล (1–28)</span><input id="rDay" class="num" type="number" min="1" max="28" value="${x.day}"></label>
+    <button type="button" class="btn ink" id="rSave">บันทึกวันที่</button>
+    <button type="button" class="btn" id="rOn">${x.on ? 'หยุดไว้ก่อน' : 'เปิดใช้อีกครั้ง'}</button>
+    <button type="button" class="btn" id="rDel" style="color:var(--bad)">ลบบิลประจำเดือนนี้</button>
+    <button type="button" class="btn" id="rX">ปิด</button>`, d => {
+    const go = async body => { try { const r = await call('hk_rec_set', Object.assign({ id: x.id }, body)); home.recs = r.recs; d.close(); toast('บันทึกแล้ว'); drawHome(); } catch (e) { toast(e.message); } };
+    $('#rX').onclick = () => d.close();
+    $('#rSave').onclick = () => go({ day: Number($('#rDay').value) || x.day });
+    $('#rOn').onclick = () => go({ on: !x.on });
+    $('#rDel').onclick = () => { if (confirm('ลบ ' + x.title + '? บิลที่สร้างไปแล้วยังอยู่')) go({ del: true }); };
+  });
+}
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const ymOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+async function openGsum(ym) {
+  $('#app').innerHTML = '<div class="msg"><div class="spin" role="status" aria-label="กำลังโหลด"></div></div>';
+  try { const d = await call('hk_gsum', { ym: ym || ymOf(new Date()) }); if (view && view.name === 'gsum') { view.sum = d.sum; draw(); } else show({ name: 'gsum', sum: d.sum }); }
+  catch (e) { toast(e.message); draw(); }
+}
+function drawGsum() {
+  const m = view.sum, [y, mo] = m.ym.split('-').map(Number);
+  $('#ttl').textContent = 'สรุปกลุ่ม';
+  const bar = (label, v, max, ic) => `<div class="pl-bar"><div class="pl-bl"><span>${ic ? ic + ' ' : ''}${esc(label)}</span><span class="num">${baht(v)}</span></div><div class="pl-tr"><i style="width:${max ? Math.max(3, Math.round(v * 100 / max)) : 0}%"></i></div></div>`;
+  const cMax = Math.max(0, ...m.cats.map(x => x[1])), pMax = Math.max(0, ...m.payers.map(x => x[1])), dMax = Math.max(0, ...m.days.map(x => x[1]));
+  const now = ymOf(new Date());
+  $('#app').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between"><button type="button" class="btn sm" id="gPrev" aria-label="เดือนก่อน">‹</button><h1 style="margin:0">${TH_MON[mo - 1]} ${y + 543}</h1><button type="button" class="btn sm" id="gNext" aria-label="เดือนถัดไป" ${m.ym >= now ? 'disabled' : ''}>›</button></div>
+    <div class="hero">
+      <div class="sec"><div class="lbl">กลุ่มใช้ไป</div><div class="big">${baht(m.totalS)}</div><div class="lbl">${m.n} บิล</div></div>
+      <div class="dark"><div class="lbl">ยังค้างจ่ายกัน</div><div class="big">${baht(m.waitS)}</div><div class="lbl">${m.waitS ? 'ดูของตัวเองที่หน้าแรก' : 'จ่ายครบแล้ว 🎉'}</div></div>
+    </div>
+    ${m.n ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใช้ไปกับอะไร</div>${m.cats.map(([k, v]) => { const c = catOf(k); return bar(c ? c[2] : 'อื่นๆ', v, cMax, c ? c[1] : '🧾'); }).join('')}</div>
+    <div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใครออกก่อน</div>${m.payers.map(([k, v]) => bar(k, v, pMax)).join('')}</div>
+    ${m.days.length > 1 ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">รายวัน</div>${m.days.map(([d, v]) => bar(thDate(d), v, dMax)).join('')}</div>` : ''}` : '<div class="sec"><div class="empty">เดือนนี้กลุ่มยังไม่มีบิล</div></div>'}
+    <div class="lbl" style="padding:0 4px">ไม่รวมเงินลงกอง/เติมกอง · ยอดของแต่ละคนดูได้เฉพาะตัวเองที่หน้าแรก · พิมพ์ สรุปกลุ่ม ในแชทได้เหมือนกัน</div>`;
+  $('#foot').classList.add('hide');
+  const shift = k => { const d = new Date(y, mo - 1 + k, 1); openGsum(ymOf(d)); };
+  $('#gPrev').onclick = () => shift(-1);
+  $('#gNext').onclick = () => shift(1);
+}
+/* ---------- 🔁 รวมยอดกับเพื่อน (หักลบกัน โอนทีเดียว) ---------- */
+function netUseful(x) { return x.toldInS || (x.iOweS && x.theyOweS) || x.n >= 2; }
+function netBlock() {
+  const list = (home.net || []).filter(netUseful);
+  if (!list.length) return '';
+  return `<div class="sec list"><div class="sec-h">🔁 รวมยอดกับเพื่อน · หักลบแล้วโอนทีเดียว</div>${list.map(x => `<button class="row-btn item" type="button" data-net="${esc(x.uid)}">
+    <div class="mid"><div class="nm">${esc(x.name)}</div><div class="lbl">${[x.iOweS ? 'คุณค้าง ' + baht(x.iOweS) : '', x.theyOweS ? 'ค้างคุณ ' + baht(x.theyOweS) : '', x.toldInS ? (x.netWaitS > -1 ? 'หักลบแล้ว โอนมา ' + baht(x.netWaitS) + ' รอคุณยืนยัน' : 'แจ้งโอนมา ' + baht(x.toldInS) + ' รอคุณยืนยัน') : ''].filter(Boolean).join(' · ')}${x.n ? ' · ' + x.n + ' บิล' : ''}</div></div>
+    ${x.iOweS || x.theyOweS ? `<div class="amt" style="color:${x.netS > 0 ? 'var(--bad)' : x.netS < 0 ? 'var(--ok)' : 'inherit'}">${x.netS > 0 ? 'โอน ' + baht(x.netS) : x.netS < 0 ? 'รับ ' + baht(-x.netS) : 'หักพอดี'}</div>` : '<span class="pill soft">รอยืนยัน</span>'}</button>`).join('')}</div>`;
+}
+function drawNet() {
+  const x = view.x, net = x.netS, pay = x.pay || {};
+  $('#ttl').textContent = 'รวมยอดกับ ' + x.name;
+  let qr = '';
+  payCanvas = null;
+  if (net > 0) {
+    const text = pay.qr ? emvAmount(pay.qr, net) : pay.pp ? ppPayload(pay.pp, net) : '';
+    if (text) { try { payCanvas = qrCanvas(text, 'จ่าย ' + baht(net), 'รวมยอดกับ ' + x.name); qr = `<img alt="QR จ่าย ${baht(net)} ให้ ${esc(x.name)}" src="${payCanvas.toDataURL('image/png')}">`; } catch (e) {} }
+  }
+  const row = b => `<div class="item"><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))} · ${b.dir === 'out' ? 'คุณค้าง' + esc(x.name) : esc(x.name) + 'ค้างคุณ'}</div></div><div class="amt" style="color:${b.dir === 'out' ? 'var(--bad)' : 'var(--ok)'}">${b.dir === 'out' ? '−' : '+'}${baht(b.amtS)}</div></div>`;
+  $('#app').innerHTML = `
+    <h1>รวมยอดกับ ${esc(x.name)}</h1>
+    ${x.bills.length ? `<div class="sec qrbox">
+      <div class="lbl">${net > 0 ? 'คุณโอนให้ ' + esc(x.name) + ' ครั้งเดียว' : net < 0 ? esc(x.name) + ' ต้องโอนให้คุณ' : 'หักลบกันพอดี'}</div>
+      <div class="due">${baht(Math.abs(net))}</div>
+      <div class="brk"><div><span>คุณค้าง ${esc(x.name)}</span><span class="num">${baht(x.iOweS)}</span></div><div><span>${esc(x.name)} ค้างคุณ</span><span class="num">− ${baht(x.theyOweS)}</span></div></div>
+      ${qr ? `<div style="margin-top:10px">${qr}</div><div class="lbl" style="text-align:center">${pay.qr ? 'QR ของ ' : 'พร้อมเพย์ของ '}${esc(x.name)} · ใส่ยอด ${baht(net)} ให้แล้ว</div>` : net > 0 && pay.bank ? `<div class="lbl" style="text-align:center">โอนเข้า ${esc(pay.bank.name)} ${esc(fmtAcct(pay.bank.acct))}${pay.bank.holder ? ' ' + esc(pay.bank.holder) : ''}</div>` : net > 0 ? `<div class="lbl" style="text-align:center">${esc(x.name)} ยังไม่ได้ตั้งช่องทางรับเงิน ถามเจ้าตัวได้เลย</div>` : ''}
+    </div>
+    <div class="sec list"><div class="sec-h">บิลที่รวมกัน ${x.n} บิล</div>${x.bills.map(row).join('')}</div>
+    <div class="lbl" style="padding:0 4px">กดแล้ว: บิลที่ ${esc(x.name)} ค้างคุณถือว่าได้รับแล้ว ส่วนบิลที่คุณค้างเป็น "แจ้งจ่ายแล้ว" รอ ${esc(x.name)} กดยืนยันในเว็บ</div>` : ''}
+    ${x.toldInS ? `<div class="sec item"><div class="mid"><div class="nm">${x.netWaitS > -1 ? esc(x.name) + ' หักลบยอดแล้ว โอนมา ' + baht(x.netWaitS) : esc(x.name) + ' แจ้งโอนมาแล้ว ' + baht(x.toldInS)}</div><div class="lbl">${x.netWaitS > -1 ? 'ยอดบิลรวม ' + baht(x.toldInS) + ' หักกับที่คุณค้างแล้ว · ' : ''}ได้รับเงินแล้ว กดยืนยันทีเดียวทุกบิล</div></div><button class="btn sm ink" type="button" id="netOk">ได้รับแล้ว</button></div>` : ''}`;
+  const ok = $('#netOk'); if (ok) ok.onclick = async () => {
+    busy(ok, true);
+    try { await call('hk_settle_ok', { with: x.uid }); await loadHome(); toast('ยืนยันแล้ว'); show('home', true); } catch (e) { toast(e.message); busy(ok, false); }
+  };
+  if (!x.bills.length) { $('#foot').classList.add('hide'); return; }
+  foot(`${payCanvas ? '<button class="btn" type="button" id="netQr">บันทึกรูป QR</button>' : ''}<button class="btn ink" type="button" id="netGo">${net > 0 ? 'โอน ' + baht(net) + ' แล้ว ปิดยอดทั้งหมด' : net < 0 ? 'ได้รับ ' + baht(-net) + ' แล้ว ปิดยอดทั้งหมด' : 'หักลบกัน ปิดยอดทั้งหมด'}</button>`);
+  const sq = $('#netQr'); if (sq) sq.onclick = saveQr;
+  $('#netGo').onclick = async () => {
+    if (!confirm(net > 0 ? 'โอน ' + baht(net) + ' ให้ ' + x.name + ' แล้ว?' : net < 0 ? 'ได้รับ ' + baht(-net) + ' จาก ' + x.name + ' แล้ว?' : 'หักลบยอดกับ ' + x.name + ' ทั้งหมด?')) return;
+    const b = $('#netGo'); busy(b, true);
+    try { const d = await call('hk_settle', { with: x.uid }); await postToChat(d.msg); await loadHome(); toast('ปิดยอดกับ ' + x.name + ' แล้ว'); show('home', true); }
+    catch (e) { toast(e.message); busy(b, false); }
+  };
+}
 async function openBill(id, root) {
   $('#app').innerHTML = '<div class="msg"><div class="spin" role="status" aria-label="กำลังโหลด"></div></div>';
   try {
@@ -127,39 +221,43 @@ async function openBill(id, root) {
 let cs = null;
 /* 🏷 หมวด → หมวดย่อย (แตะแล้วตั้งชื่อบิล + วิธีหารให้) · ตรงกับหมวดในแอป (scat.js) */
 const HK_CATS = [
-  ['food', '🍜', 'อาหาร', [['ชาบู/หมูกระทะ', 'items'], ['ร้านอาหาร', 'items'], ['เดลิเวอรี่', 'items'], ['กาแฟ/ขนม', 'items']]],
+  ['food', '🍜', 'อาหาร', [['ชาบู/หมูกระทะ', 'items'], ['ร้านอาหาร', 'items'], ['บุฟเฟ่ต์', 'equal', 'หัว', 1], ['เดลิเวอรี่', 'items'], ['กาแฟ/ขนม', 'items']]],
   ['mart', '🏪', 'เซเว่น', [['เซเว่น', 'items'], ['ซูเปอร์มาร์เก็ต', 'items']]],
-  ['sport', '🏸', 'กีฬา', [['ค่าคอร์ท', 'hours', 'ชม.', 1], ['ลูกแบด', 'equal', 'ลูก', 1], ['ค่าสนาม', 'hours', 'ชม.', 1], ['ฟุตซอล', 'hours', 'ชม.', 1], ['ค่าน้ำ/น้ำแข็ง', 'equal']]],
+  ['sport', '🏸', 'กีฬา', [['ค่าคอร์ท', 'hours', 'ชม.', 1], ['ลูกแบด', 'equal', 'ลูก', 1], ['ค่าสนาม', 'hours', 'ชม.', 1], ['ฟุตซอล', 'hours', 'ชม.', 1], ['ค่าโค้ช', 'hours', 'ชม.', 1], ['เช่าอุปกรณ์', 'equal'], ['ค่าน้ำ/น้ำแข็ง', 'equal']]],
+  ['play', '🎳', 'เล่นด้วยกัน', [['โบว์ลิ่ง', 'equal', 'เกม', 1], ['สนุกเกอร์/พูล', 'hours', 'ชม.', 1], ['บอร์ดเกมคาเฟ่', 'hours', 'ชม.', 1], ['ห้องเกม/Escape room', 'equal']]],
   ['karaoke', '🎤', 'คาราโอเกะ', [['ค่าห้อง', 'hours', 'ชม.', 1], ['เครื่องดื่ม', 'equal'], ['อาหาร', 'items']]],
-  ['drink', '🍻', 'ปาร์ตี้', [['เบียร์/เหล้า', 'equal'], ['มิกเซอร์/น้ำแข็ง', 'equal'], ['ค่าเข้าร้าน', 'equal']]],
+  ['drink', '🍻', 'ปาร์ตี้', [['เบียร์/เหล้า', 'share'], ['มิกเซอร์/น้ำแข็ง', 'equal'], ['ค่าเข้าร้าน', 'equal']]],
   ['ride', '🚕', 'เดินทาง', [['แท็กซี่/Grab', 'equal'], ['ค่าน้ำมัน', 'equal'], ['ทางด่วน', 'equal'], ['ค่าจอดรถ', 'equal']]],
   ['trip', '🧳', 'ทริป', [['ค่าที่พัก', 'hours', 'คืน', 1], ['เช่ารถ', 'hours', 'วัน', 1], ['ค่าตั๋ว', 'equal'], ['ค่ากิจกรรม', 'equal']]],
-  ['movie', '🎬', 'หนัง', [['ตั๋วหนัง', 'equal'], ['ป๊อปคอร์น', 'equal']]],
-  ['home', '🏠', 'บ้าน', [['ค่าเน็ต', 'equal'], ['ค่าไฟ', 'equal'], ['ค่าน้ำ', 'equal'], ['Netflix/YouTube', 'equal'], ['ค่าส่วนกลาง', 'equal']]],
+  ['movie', '🎬', 'หนัง/คอนเสิร์ต', [['ตั๋วหนัง', 'equal'], ['ป๊อปคอร์น', 'equal'], ['บัตรคอนเสิร์ต', 'equal'], ['งานอีเวนต์', 'equal']]],
+  ['sub', '📺', 'สมาชิกรายเดือน', [['Netflix', 'equal'], ['YouTube Premium', 'equal'], ['Spotify Family', 'equal'], ['iCloud', 'equal'], ['แอป AI', 'equal']]],
+  ['home', '🏠', 'บ้าน', [['ค่าเน็ต', 'equal'], ['ค่าไฟ', 'equal'], ['ค่าน้ำ', 'equal'], ['ค่าส่วนกลาง', 'equal']]],
+  ['buy', '🛍', 'ซื้อรวม/สั่งของ', [['สั่งของออนไลน์', 'items'], ['ค่าส่ง', 'equal'], ['ซื้อของเข้าบ้าน', 'items']]],
   ['gift', '🎁', 'ของขวัญ', [['ของขวัญวันเกิด', 'equal'], ['เค้ก', 'equal'], ['ซองงาน', 'equal']]],
 ];
 const catOf = k => HK_CATS.find(c => c[0] === k);
-const MODES = [['equal', 'เท่ากัน'], ['hours', 'ตามชั่วโมง'], ['items', 'ตามเมนู'], ['custom', 'ระบุรายคน']];
+const MODES = [['equal', 'เท่ากัน'], ['share', 'สัดส่วน'], ['hours', 'ชั่วโมง'], ['items', 'เมนู'], ['custom', 'รายคน']];
 function openCreate(bill, root) {
   const mem = (home.group && home.group.members) || [];
   const me = { key: 'me', uid: '', name: (home.me.disp || 'ฉัน'), me: true, on: true, units: 2, custom: '' };
   if (!bill) {
-    cs = { edit: null, title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', selfUnits: true, cat: '', calc: false, rate: '', qty: '', parts: null, cur: 0, billTitle: '', rcpt: '', rcptImg: '', hadRcpt: false, items: [], people: [me].concat(mem.map(m => ({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }))) };
+    cs = { fx: null, edit: null, title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', selfUnits: true, cat: '', calc: false, rate: '', qty: '', parts: null, cur: 0, billTitle: '', rcpt: '', rcptImg: '', hadRcpt: false, items: [], people: [me].concat(mem.map(m => ({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }))) };
   } else {
     const rows = bill.rows || [];
     cs = { edit: bill.id, title: bill.title, total: plain(bill.totalS), touched: true, mode: bill.mode, unit: bill.unit || 'ชม.', selfUnits: !!bill.selfUnits, cat: bill.cat || '', rcpt: '', rcptImg: '', hadRcpt: !!bill.rcpt,
       items: (bill.items || []).map(it => ({ name: it.name, price: plain(it.priceS), who: it.who.map(k => k) })), people: [] };
-    me.on = bill.payerIn; me.units = bill.payerUnits || 2; me.custom = plain(bill.payerShareS);
+    me.on = bill.payerIn; me.units = bill.payerUnits || 2; me.share = bill.mode === 'share' ? bill.payerUnits || 1 : 1; me.custom = plain(bill.payerShareS);
     cs.people.push(me);
-    rows.forEach(r => cs.people.push({ key: r.k, uid: r.uid, name: r.name, on: true, units: r.units || 2, custom: plain(r.amtS), out: r.out, byUid: r.byMe ? 'me' : r.byUid || '' }));
+    rows.forEach(r => cs.people.push({ key: r.k, uid: r.uid, name: r.name, on: true, units: r.units || 2, share: bill.mode === 'share' ? r.units || 1 : 1, custom: plain(r.amtS), out: r.out, byUid: r.byMe ? 'me' : r.byUid || '' }));
     mem.forEach(m => { if (!cs.people.some(p => p.uid === m.uid)) cs.people.push({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }); });
+    cs.fx = bill.fx ? { code: bill.fx.code, rate: bill.fx.rate } : null;
     Object.assign(cs, { calc: !!bill.calc, rate: bill.calc ? plain(bill.calc.rateS) : '', qty: bill.calc && bill.calc.qty ? String(bill.calc.qty) : '', parts: null, cur: 0, billTitle: '' });
     if (bill.calc && bill.calc.unit) cs.unit = bill.calc.unit;
     if (bill.parts && bill.parts.length > 1) {   // 🧩 บิลหลายรายการ: คืนแต่ละรายการให้แก้ต่อ
       cs.billTitle = bill.title;
       cs.parts = bill.parts.map(pt => {
         const pp = {};
-        cs.people.forEach(p => { const v = (pt.sh || {})[p.key] || 0; pp[p.key] = { on: v > 0, units: (pt.u || {})[p.key] || 2, custom: v ? plain(v) : '' }; });
+        cs.people.forEach(p => { const v = (pt.sh || {})[p.key] || 0; pp[p.key] = { on: v > 0, units: (pt.u || {})[p.key] || 2, share: pt.mode === 'share' ? (pt.u || {})[p.key] || 1 : 1, custom: v ? plain(v) : '' }; });
         return { title: pt.name, total: plain(pt.totalS), touched: true, mode: pt.mode, unit: pt.unit || 'ชม.', cat: pt.cat || '', calc: !!pt.rateS, rate: pt.rateS ? plain(pt.rateS) : '', qty: pt.qty ? String(pt.qty) : '',
           items: (pt.items || []).map(it => ({ name: it.name, price: plain(it.priceS), who: it.who.slice() })), pp: pp };
       });
@@ -189,10 +287,27 @@ function calcQty() {
   if (q > 0) return q;
   return cs.mode === 'hours' ? Math.max(0, ...cs.people.filter(p => p.on).map(p => p.units)) : 0;
 }
+/* ---------- 💱 เงินต่างประเทศ: ช่องยอดทุกช่องเป็นสกุลนั้น แล้วแปลงเป็นบาทด้วยเรตที่ใส่ (เรตเริ่มต้นเป็นค่าประมาณ แก้ได้ · จำเรตล่าสุดในเครื่อง) ---------- */
+const FX = [['JPY', '¥', 'เยน', 0.24], ['KRW', '₩', 'วอน', 0.025], ['USD', '$', 'ดอลลาร์', 35], ['EUR', '€', 'ยูโร', 38], ['CNY', '¥', 'หยวน', 4.9], ['SGD', 'S$', 'ดอลลาร์สิงคโปร์', 26], ['TWD', 'NT$', 'ดอลลาร์ไต้หวัน', 1.1], ['HKD', 'HK$', 'ดอลลาร์ฮ่องกง', 4.5], ['VND', '₫', 'ดอง', 0.0014], ['MYR', 'RM', 'ริงกิต', 7.7], ['GBP', '£', 'ปอนด์', 44], ['LAK', '₭', 'กีบ', 0.0016]];
+const fxOf = c => FX.find(x => x[0] === c);
+const fxRate = () => cs.fx && cs.fx.rate > 0 ? cs.fx.rate : 1;
+const fxS = v => Math.round(toS(v) * fxRate());
+const fxTxt = (f, origS) => { const x = fxOf(f.code) || [f.code, f.code]; return (origS != null ? x[1] + (origS / 100).toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' · ' : '') + '1 ' + f.code + ' = ' + f.rate + ' บาท'; };
+function fxLast(code, rate) { try { const o = JSON.parse(localStorage.getItem('hk:fx') || '{}'); if (rate) { o[code] = rate; localStorage.setItem('hk:fx', JSON.stringify(o)); } return o[code]; } catch (e) { return null; } }
+function fxBlock() {
+  if (!cs.fx) return `<button type="button" class="lnk" id="fxOn" style="align-self:flex-start;padding:0">💱 จ่ายเป็นเงินต่างประเทศ (ทริปต่างประเทศ)</button>`;
+  return `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+    <label class="field" style="flex:1.3;min-width:120px"><span class="lbl">สกุลเงิน</span><select id="fxCode" style="border:0;border-bottom:1px solid var(--line);background:transparent;font:inherit;color:inherit;padding:6px 0">${FX.map(x => `<option value="${x[0]}" ${cs.fx.code === x[0] ? 'selected' : ''}>${x[1]} ${x[2]}</option>`).join('')}</select></label>
+    <label class="field" style="flex:1;min-width:90px"><span class="lbl">1 ${esc(cs.fx.code)} = กี่บาท</span><input id="fxRate" class="num" type="text" inputmode="decimal" value="${esc(String(cs.fx.rate))}"></label>
+    <button type="button" class="lnk" id="fxOff" style="padding:0 0 8px">ใช้บาท</button></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap"><button type="button" class="lnk" id="fxLive" style="padding:0">🌐 ดึงเรตวันนี้</button><button type="button" class="lnk" id="fxPaid" style="padding:0">💳 ใส่ยอดบาทที่จ่ายจริง</button></div>
+    ${cs.fx.note ? `<div class="lbl">${esc(cs.fx.note)}</div>` : ''}
+    <div class="lbl" id="fxEq">ยอดที่ใส่เป็น${esc((fxOf(cs.fx.code) || [])[2] || cs.fx.code)} · เพื่อนโอนเป็นบาทตามเรตนี้ (เช็กเรตจริงก่อนส่ง)</div>`;
+}
 function compute() {
   const on = cs.people.filter(p => p.on), amt = {}, sub = {};
   if (cs.calc) { const t = Math.round(toS(cs.rate) * calcQty()); cs.total = t ? plain(t) : ''; cs.touched = true; }
-  let T = toS(cs.total);
+  let T = fxS(cs.total);
   if (cs.mode === 'items') {
     const keys = on.map(p => p.key);
     let itemsS = 0;
@@ -203,15 +318,15 @@ function compute() {
       const o = {}; spread(P, who.map(k => ({ key: k })), null, () => 1, o);
       who.forEach(k => { sub[k] = (sub[k] || 0) + o[k]; });
     });
-    if (!cs.touched) { T = itemsS; cs.total = itemsS ? plain(itemsS) : ''; }
+    if (!cs.touched) { cs.total = itemsS ? plain(itemsS) : ''; T = fxS(cs.total); }
     const got = Object.values(sub).reduce((s, x) => s + x, 0);
     if (got && T) spread(T, on.filter(p => sub[p.key]), null, p => sub[p.key], amt);
   } else if (cs.mode === 'custom') {
-    on.forEach(p => { if (!p.me) amt[p.key] = toS(p.custom); });
+    on.forEach(p => { if (!p.me) amt[p.key] = fxS(p.custom); });
     const others = Object.values(amt).reduce((s, x) => s + x, 0);
     const me = on.find(p => p.me);
     if (me) amt.me = Math.max(0, T - others);
-  } else spread(T, on, 'me', p => cs.mode === 'hours' ? p.units : 1, amt);
+  } else spread(T, on, 'me', p => cs.mode === 'hours' ? p.units : cs.mode === 'share' ? (p.share || 1) : 1, amt);
   const sum = on.reduce((s, p) => s + (amt[p.key] || 0), 0);
   return { T, amt, sub, sum, diff: T - sum };
 }
@@ -233,20 +348,20 @@ const PART_F = ['title', 'total', 'touched', 'mode', 'unit', 'cat', 'calc', 'rat
 function partSnap() {
   const o = { items: cs.items.map(it => ({ name: it.name, price: it.price, who: it.who.slice() })), pp: {} };
   PART_F.forEach(f => { o[f] = cs[f]; });
-  cs.people.forEach(p => { o.pp[p.key] = { on: p.on, units: p.units, custom: p.custom }; });
+  cs.people.forEach(p => { o.pp[p.key] = { on: p.on, units: p.units, custom: p.custom, share: p.share || 1 }; });
   return o;
 }
 function partLoad(o) {
   PART_F.forEach(f => { cs[f] = o[f]; });
   cs.items = o.items.map(it => ({ name: it.name, price: it.price, who: it.who.slice() }));
-  cs.people.forEach(p => { const x = o.pp[p.key]; if (x) Object.assign(p, x); else Object.assign(p, { on: false, units: 2, custom: '' }); });
+  cs.people.forEach(p => { const x = o.pp[p.key]; if (x) Object.assign(p, x); else Object.assign(p, { on: false, units: 2, custom: '', share: 1 }); });
 }
 function partGo(i) { cs.parts[cs.cur] = partSnap(); cs.cur = i; partLoad(cs.parts[i]); drawCreate(); window.scrollTo(0, 0); }
 function partAdd() {
   if (!cs.parts) { cs.parts = [partSnap()]; cs.cur = 0; }
   cs.parts[cs.cur] = partSnap();
   const n = { title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', cat: cs.cat, calc: false, rate: '', qty: '', items: [], pp: {} };
-  cs.people.forEach(p => { n.pp[p.key] = { on: p.on, units: 2, custom: '' }; });   // คนเดิมทุกคน เอาออกได้
+  cs.people.forEach(p => { n.pp[p.key] = { on: p.on, units: 2, custom: '', share: p.share || 1 }; });   // คนเดิมทุกคน เอาออกได้
   cs.parts.push(n); cs.cur = cs.parts.length - 1; partLoad(n); cs.selfUnits = false;
   drawCreate(); window.scrollTo(0, 0); setTimeout(() => { const t = $('#cTitle'); if (t) t.focus(); }, 50);
 }
@@ -289,7 +404,7 @@ function drawCreate() {
       ${cs.parts ? `<div style="display:flex;justify-content:space-between;align-items:center"><span class="sec-h" style="padding:0">รายการที่ ${cs.cur + 1}</span><button type="button" class="lnk" id="partDel" style="padding:0;color:var(--bad)">ลบรายการนี้</button></div>` : ''}
       <div style="display:flex;gap:12px">
         <label class="field" style="flex:1.4"><span class="lbl">ค่าอะไร</span><input id="cTitle" type="text" maxlength="60" placeholder="เช่น ชาบู ค่าคอร์ท" value="${esc(cs.title)}"></label>
-        <label class="field" style="flex:1"><span class="lbl">${cs.calc ? 'ยอด (คิดให้)' : 'ยอดรวม (บาท)'}</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}" ${cs.calc ? 'readonly' : ''}></label>
+        <label class="field" style="flex:1"><span class="lbl">${cs.calc ? 'ยอด (คิดให้)' : 'ยอดรวม'} (${cs.fx ? esc((fxOf(cs.fx.code) || [0, cs.fx.code])[1]) : 'บาท'})</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}" ${cs.calc ? 'readonly' : ''}></label>
       </div>
       ${cs.calc ? `<div class="calc" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
         <label class="field" style="flex:1.2;min-width:96px"><span class="lbl">ราคาต่อ<input id="cUnit" type="text" maxlength="8" value="${esc(cs.unit)}" aria-label="หน่วย" style="width:3.6em;border:0;border-bottom:1px dashed var(--line);background:transparent;font:inherit;color:inherit;padding:0 2px"></span><input id="cRate" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.rate)}"></label>
@@ -297,11 +412,12 @@ function drawCreate() {
         <label class="field" style="flex:1;min-width:80px"><span class="lbl">ใช้ไปกี่${esc(cs.unit)}</span><input id="cQty" class="num" type="text" inputmode="decimal" placeholder="${cs.mode === 'hours' ? String(calcQty() || 0) : '0'}" value="${esc(cs.qty)}"></label>
         <button type="button" class="lnk" id="calcOff" style="padding:0 0 8px">ใส่ยอดเอง</button>
       </div>${cs.mode === 'hours' ? '<div class="lbl">ไม่ใส่จำนวน = ใช้เวลาของคนที่อยู่นานสุด แล้วหารตามชั่วโมงของแต่ละคน</div>' : ''}` : `<button type="button" class="lnk" id="calcOn" style="align-self:flex-start;padding:0">🧮 คิดจากราคาต่อหน่วย (เช่น ลูกละ 80 × 4 ลูก)</button>`}
+      ${cs.pool && cs.fx ? '' : fxBlock()}
     </div>
     ${rcptBlock()}
     ${cs.poolEq ? `<div class="sec list" id="people"><div class="item"><div class="mid"><div class="nm">หารเท่ากัน ${cs.poolN} คน</div><div class="lbl">${esc(cs.people.filter(p => p.on).map(p => p.me ? 'ฉัน' : p.name).join(', '))}</div></div><div class="amt" id="eqEach"></div></div></div>` : `<div class="tabs" role="group" aria-label="วิธีหาร">${MODES.map(([k, l]) => `<button type="button" class="tab" data-mode="${k}" aria-pressed="${cs.mode === k}">${l}</button>`).join('')}</div>
     ${cs.mode === 'items' && cs.touched && itemsTotal() && itemsTotal() !== toS(cs.total) ? `<div class="lbl" style="margin:-4px 4px 0">เมนูรวม ${baht(itemsTotal())} ไม่เท่ายอดบิล ส่วนต่าง (ค่าบริการ/ส่วนลด) แบ่งตามสัดส่วนที่แต่ละคนกิน</div>` : ''}
-    <div class="lbl" style="margin:-4px 4px 0">${{ equal: 'ทุกคนที่ติ๊กจ่ายเท่ากัน เศษอยู่กับคนจ่ายก่อน', hours: 'กด − + ปรับจำนวนชั่วโมงของแต่ละคน มาน้อยจ่ายน้อย', items: 'ใส่เมนู แล้วแตะชื่อคนที่กินเมนูนั้น เมนูที่กินด้วยกันหารเท่ากัน', custom: 'รู้ยอดของแต่ละคนอยู่แล้ว (เช่น ต่างคนต่างซื้อ) ใส่ยอดของเพื่อนแต่ละคน ที่เหลือเป็นส่วนของคุณ' }[cs.mode]}</div>
+    <div class="lbl" style="margin:-4px 4px 0">${{ equal: 'ทุกคนที่ติ๊กจ่ายเท่ากัน เศษอยู่กับคนจ่ายก่อน', hours: 'กด − + ปรับจำนวนชั่วโมงของแต่ละคน มาน้อยจ่ายน้อย', share: 'กด − + ใส่สัดส่วน เช่น มาเป็นคู่นับ 2 เด็กนับ 0.5 ไม่ดื่มนับ 0.5', items: 'ใส่เมนู แล้วแตะชื่อคนที่กินเมนูนั้น เมนูที่กินด้วยกันหารเท่ากัน', custom: 'รู้ยอดของแต่ละคนอยู่แล้ว (เช่น ต่างคนต่างซื้อ) ใส่ยอดของเพื่อนแต่ละคน ที่เหลือเป็นส่วนของคุณ' }[cs.mode]}</div>
     ${cs.mode === 'hours' && !cs.parts ? `<label class="lbl" style="display:flex;gap:8px;align-items:center;margin:0 4px"><input type="checkbox" id="selfU" ${cs.selfUnits ? 'checked' : ''} style="width:18px;height:18px"> ให้เพื่อนกดแก้ชั่วโมงของตัวเองได้ (จนกว่าจะมีคนจ่าย)</label>` : ''}
     ${cs.mode === 'items' ? itemsBlock() : ''}
     <div class="sec list" id="people">
@@ -310,8 +426,10 @@ function drawCreate() {
     </div>
     ${mem.length ? '<div class="lbl" style="padding:0 4px">ไม่เห็นชื่อใคร ให้คนนั้นแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก หรือเพิ่มเป็นคนนอกกลุ่มไปก่อน</div>' : '<div class="lbl" style="padding:0 4px">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก (พิมพ์ แมวกวัก ในกลุ่มเพื่อเรียกการ์ด) แล้วกลับมาที่หน้านี้ใหม่</div>'}`}
     ${cs.poolEq ? '' : cs.parts ? '<div class="sec list" id="allSum"></div>' : `<button type="button" class="row-btn item" id="partAdd" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;text-align:left;font:inherit;color:inherit"><span class="mid" style="display:flex;flex-direction:column;gap:2px"><span class="nm">+ เพิ่มรายการในบิลนี้</span><span class="lbl">เช่น ค่าคอร์ท + ค่าลูก + ข้าว + ค่ารถ แต่ละรายการเลือกหมวดและวิธีหารเองได้</span></span></button>`}
+    ${cs.pool || cs.edit ? '' : `<label class="sec" style="padding:12px 14px;display:flex;gap:10px;align-items:center"><input type="checkbox" id="cRep" ${cs.repeat ? 'checked' : ''} style="width:20px;height:20px;flex:none"><span class="mid"><span class="nm">🔁 ทำซ้ำทุกเดือน</span><span class="lbl" style="display:block">แมวกวักสร้างบิลนี้ใหม่และส่งเข้ากลุ่มให้ทุกเดือน วันที่ <input id="cRepDay" class="num" type="number" min="1" max="28" value="${cs.repeatDay || Math.min(28, new Date().getDate())}" style="width:3.2em;border:0;border-bottom:1px solid var(--line);background:transparent;font:inherit;color:inherit;text-align:center"></span></span></label>`}
     ${cs.pool ? '' : payBlock()}`;
   bindCreate();
+  const rp = $('#cRep'); if (rp) { rp.onchange = () => { cs.repeat = rp.checked; }; $('#cRepDay').oninput = e => { cs.repeatDay = Math.min(28, Math.max(1, Number(e.target.value) || 1)); }; }
   if (again) { const cr = $('#catRow'); if (cr) cr.scrollLeft = keepX; window.scrollTo(0, keepY); }
   const su = $('#selfU'); if (su) su.onchange = () => { cs.selfUnits = su.checked; };
   foot(`<div class="sum"><span class="lbl" id="fl"></span><span id="fr" style="font-weight:600"></span></div><button class="btn ink" type="button" id="send">${cs.pool ? 'บันทึกบิลจากกอง' : cs.edit ? 'บันทึกและส่งบิลเข้ากลุ่ม' : 'ส่งบิลเข้ากลุ่ม'}</button>`);
@@ -345,6 +463,7 @@ function personRow(p) {
   return `<div class="item ${p.on ? '' : ''}">
     <button type="button" class="chk" data-on="${i}" aria-pressed="${p.on}" aria-label="${p.on ? 'เอาออก' : 'ใส่'} ${esc(p.name)}">${CHECK}</button>
     <div class="mid ${p.on ? '' : 'dim'}"><div class="nm">${esc(p.name)}${p.me ? ' (ฉัน)' : ''}</div><div class="lbl" data-sub="${i}">${sub}</div></div>
+    ${cs.mode === 'share' && p.on ? `<div class="step"><button type="button" data-sdec="${i}" aria-label="ลดสัดส่วนของ ${esc(p.name)}">−</button><span class="num">${p.share || 1} ส่วน</span><button type="button" data-sinc="${i}" aria-label="เพิ่มสัดส่วนของ ${esc(p.name)}">+</button></div>` : ''}
     ${cs.mode === 'hours' && p.on ? `<div class="step"><button type="button" data-dec="${i}" aria-label="ลดของ ${esc(p.name)}">−</button><span class="num">${p.units} ${esc(cs.unit)}</span><button type="button" data-inc="${i}" aria-label="เพิ่มของ ${esc(p.name)}">+</button></div>` : ''}
     ${cs.mode === 'custom' && p.on && !p.me ? `<label><span class="sr">ยอดของ ${esc(p.name)}</span><input class="amt-in num" type="text" inputmode="decimal" data-cus="${i}" value="${esc(p.custom)}" placeholder="0"></label>` : ''}
     <div class="amt ${p.on ? '' : 'dim'}" style="min-width:64px" data-amt="${esc(p.key)}">—</div>
@@ -379,6 +498,23 @@ function bindCreate() {
   const on = (id, f) => { const el = $(id); if (el) el.onclick = f; };
   on('#calcOn', () => { cs.calc = true; if (!cs.rate && toS(cs.total)) cs.rate = cs.total; drawCreate(); const r = $('#cRate'); if (r) r.focus(); });
   on('#calcOff', () => { cs.calc = false; drawCreate(); });
+  on('#fxOn', () => { const c = 'JPY', last = fxLast(c); cs.fx = { code: c, rate: last || fxOf(c)[3], note: last ? 'เรตที่ใช้ครั้งก่อน' : 'เรตประมาณ กด ดึงเรตวันนี้ ถ้าอยากได้เรตจริง' }; drawCreate(); });
+  on('#fxOff', () => { cs.fx = null; drawCreate(); });
+  on('#fxLive', async () => {
+    const b = $('#fxLive'); b.textContent = 'กำลังดึงเรต…';
+    try { const r = await call('hk_fx', { code: cs.fx.code }); cs.fx.rate = r.rate; cs.fx.note = 'เรตกลางตลาด ' + (r.at || 'วันนี้') + ' · บัตร/ร้านแลกเงินมักแพงกว่า 1–3%'; fxLast(cs.fx.code, r.rate); drawCreate(); }
+    catch (e) { toast(e.message); b.textContent = '🌐 ดึงเรตวันนี้'; }
+  });
+  on('#fxPaid', () => {   // บัตรตัดจริงกี่บาท → คิดเรตกลับ (ยุติธรรมสุด เพื่อนจ่ายตามที่จ่ายจริง)
+    const f = cs.parts ? cs.parts.reduce((a, pt, i) => a + toS(i === cs.cur ? cs.total : pt.total), 0) : toS(cs.total);
+    if (!f) { toast('ใส่ยอดเป็น' + ((fxOf(cs.fx.code) || [])[2] || cs.fx.code) + 'ก่อน'); return; }
+    const v = prompt('ยอดที่จ่ายจริงเป็นบาท (บัตรตัด/แลกเงิน)', '');
+    const thb = toS(v || '');
+    if (!thb) return;
+    cs.fx.rate = Math.round(thb / f * 1e9) / 1e9; cs.fx.note = 'เรตจากยอดที่จ่ายจริง ' + baht(thb); fxLast(cs.fx.code, cs.fx.rate); drawCreate();
+  });
+  const fc = $('#fxCode'); if (fc) fc.onchange = () => { const last = fxLast(fc.value); cs.fx = { code: fc.value, rate: last || fxOf(fc.value)[3], note: last ? 'เรตที่ใช้ครั้งก่อน' : 'เรตประมาณ กด ดึงเรตวันนี้ ถ้าอยากได้เรตจริง' }; drawCreate(); };
+  const fr2 = $('#fxRate'); if (fr2) fr2.oninput = e => { const v = Number(String(e.target.value).replace(/[^\d.]/g, '')); if (v > 0) { cs.fx.rate = v; cs.fx.note = ''; fxLast(cs.fx.code, v); } refresh(); };
   const ci = (id, f) => { const el = $(id); if (el) el.oninput = e => { cs[f] = e.target.value; refresh(); }; };
   ci('#cRate', 'rate'); ci('#cQty', 'qty');
   const cu = $('#cUnit'); if (cu) cu.oninput = e => { cs.unit = e.target.value.trim() || 'หน่วย'; };
@@ -400,6 +536,8 @@ function bindCreate() {
   A.querySelectorAll('[data-on]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.on]; p.on = !p.on; if (!p.on) cs.items.forEach(it => { it.who = it.who.filter(k => k !== p.key); }); drawCreate(); });
   A.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.inc]; p.units = Math.min(24, p.units + 0.5); drawCreate(); });
   A.querySelectorAll('[data-dec]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.dec]; p.units = Math.max(0.5, p.units - 0.5); drawCreate(); });
+  A.querySelectorAll('[data-sinc]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.sinc]; p.share = Math.min(10, (p.share || 1) + 0.5); drawCreate(); });
+  A.querySelectorAll('[data-sdec]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.sdec]; p.share = Math.max(0.5, (p.share || 1) - 0.5); drawCreate(); });
   A.querySelectorAll('[data-cus]').forEach(i => i.oninput = () => { cs.people[+i.dataset.cus].custom = i.value; refresh(); });
   A.querySelectorAll('[data-by]').forEach(b => b.onclick = () => pickBy(cs.people[+b.dataset.by]));
   A.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { cs.cat = cs.cat === b.dataset.cat ? '' : b.dataset.cat; drawCreate(); });
@@ -409,6 +547,7 @@ function bindCreate() {
     if (x[2]) cs.unit = x[2];
     if (x[3]) { cs.calc = true; cs.qty = ''; }
     if (x[1] === 'hours') cs.mode = 'hours';
+    else if (x[1] === 'share') cs.mode = 'share';
     else if (x[1] === 'items') { cs.mode = 'items'; if (!cs.items.length) { cs.items.push({ name: '', price: '', who: [] }); cs.touched = !!toS(cs.total); } }
     else cs.mode = 'equal';
     if (cs.poolEq) cs.mode = 'equal';   // กองหารเท่ากันทั้งกอง: เลือกหมวดย่อยได้แค่ชื่อ
@@ -430,6 +569,7 @@ function bindCreate() {
 function refresh() {
   const all = computeAll(), r = cs.parts ? all.list[cs.cur] : all.list[0];
   if (cs.calc) { const t = $('#cTotal'); if (t) t.value = cs.total; }
+  const fe = $('#fxEq'); if (fe && cs.fx) fe.textContent = '≈ ' + baht(r.T) + ' · เพื่อนโอนเป็นบาทตามเรตนี้ (เช็กเรตจริงก่อนส่ง)';
   cs.people.forEach(p => { const el = $(`[data-amt="${CSS.escape(p.key)}"]`); if (el) el.textContent = p.on ? baht(r.amt[p.key] || 0) : '—'; });
   if (cs.mode === 'items' && !cs.touched) { const t = $('#cTotal'); if (t && document.activeElement !== t) t.value = cs.total; }
   // คนที่จ่ายแทนคนนอกกลุ่ม: บอกยอดที่ต้องโอนรวม
@@ -548,23 +688,24 @@ async function submitCreate() {
     const all = computeAll();
     if (all.bad > -1) { partGo(all.bad); toast('รายการที่ ' + (all.bad + 1) + ' ยอดยังไม่ครบ'); return; }
     const big = cs.parts.map((pt, i) => [pt, all.list[i].T]).sort((x, y) => y[1] - x[1])[0][0];
-    const payload = { b: cs.edit || '', pool: cs.pool || '', title: (cs.billTitle.trim() || autoTitle()), totalS: all.T, mode: 'custom', unit: '', selfUnits: false, cat: big.cat || '', rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt,
+    const payload = { fx: cs.fx ? { code: cs.fx.code, rate: cs.fx.rate, origS: cs.parts.reduce((a, pt) => a + toS(pt.total), 0) } : null, repeatDay: cs.repeat ? cs.repeatDay || Math.min(28, new Date().getDate()) : 0, b: cs.edit || '', pool: cs.pool || '', title: (cs.billTitle.trim() || autoTitle()), totalS: all.T, mode: 'custom', unit: '', selfUnits: false, cat: big.cat || '', rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt,
       payerIn: (all.amt.me || 0) > 0, payerShareS: all.amt.me || 0, payerUnits: 0, payerItems: [], items: [],
       members: cs.people.filter(p => !p.me && (all.amt[p.key] || 0) > 0).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: all.amt[p.key], units: 0, items: [] })),
       parts: cs.parts.map((pt, i) => {
         const sh = {}, u = {};
         Object.keys(all.list[i].amt).forEach(k => { if (all.list[i].amt[k]) sh[k] = all.list[i].amt[k]; });
-        if (pt.mode === 'hours') Object.keys(pt.pp).forEach(k => { if (pt.pp[k].on) u[k] = pt.pp[k].units; });
+        if (pt.mode === 'hours' || pt.mode === 'share') Object.keys(pt.pp).forEach(k => { if (pt.pp[k].on) u[k] = pt.mode === 'share' ? pt.pp[k].share || 1 : pt.pp[k].units; });
         const q = Number(String(pt.qty).replace(/[^\d.]/g, '')) || (pt.mode === 'hours' ? Math.max(0, ...Object.values(pt.pp).filter(x => x.on).map(x => x.units)) : 0);
-        return { name: pt.title.trim() || 'รายการ ' + (i + 1), cat: pt.cat, mode: pt.mode, unit: pt.unit, rateS: pt.calc ? toS(pt.rate) : 0, qty: pt.calc ? q : 0, totalS: all.list[i].T, sh: sh, u: u,
+        return { name: pt.title.trim() || 'รายการ ' + (i + 1), cat: pt.cat, mode: pt.mode, unit: pt.mode === 'share' ? 'ส่วน' : pt.unit, rateS: pt.calc ? toS(pt.rate) : 0, qty: pt.calc ? q : 0, totalS: all.list[i].T, sh: sh, u: u,
           items: pt.mode === 'items' ? pt.items.map(it => ({ name: it.name || 'เมนู', priceS: toS(it.price), who: it.who })) : [] };
       }) };
     return sendCreate(payload, $('#send'));
   }
   const payload = {
-    rateS: cs.calc ? toS(cs.rate) : 0, qty: cs.calc ? calcQty() : 0, calcUnit: cs.unit,
-    b: cs.edit || '', pool: cs.pool || '', title: cs.title.trim(), totalS: r.T, mode: cs.mode, unit: cs.unit, selfUnits: cs.mode === 'hours' && cs.selfUnits, cat: cs.cat, rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt, payerIn: me.on, payerShareS: me.on ? r.amt.me || 0 : 0, payerUnits: me.units, payerItems: itemsFor('me'),
-    members: cs.people.filter(p => p.on && !p.me).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: r.amt[p.key] || 0, units: cs.mode === 'hours' ? p.units : 0, items: itemsFor(p.key) })),
+    fx: cs.fx ? { code: cs.fx.code, rate: cs.fx.rate, origS: toS(cs.total) } : null,
+    rateS: cs.calc ? toS(cs.rate) : 0, qty: cs.calc ? calcQty() : 0, calcUnit: cs.unit, repeatDay: cs.repeat ? cs.repeatDay || Math.min(28, new Date().getDate()) : 0,
+    b: cs.edit || '', pool: cs.pool || '', title: cs.title.trim(), totalS: r.T, mode: cs.mode, unit: cs.mode === 'share' ? 'ส่วน' : cs.unit, selfUnits: cs.mode === 'hours' && cs.selfUnits, cat: cs.cat, rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt, payerIn: me.on, payerShareS: me.on ? r.amt.me || 0 : 0, payerUnits: cs.mode === 'share' ? me.share || 1 : me.units, payerItems: itemsFor('me'),
+    members: cs.people.filter(p => p.on && !p.me).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: r.amt[p.key] || 0, units: cs.mode === 'hours' ? p.units : cs.mode === 'share' ? p.share || 1 : 0, items: itemsFor(p.key) })),
     items: cs.mode === 'items' ? cs.items.map(it => ({ name: it.name || 'เมนู', priceS: toS(it.price), who: it.who })) : [],
   };
   return sendCreate(payload, btn);
@@ -604,13 +745,19 @@ function drawPoolNew() {
       ${add ? '' : `<label class="field" style="flex:1.4"><span class="lbl">ชื่อกอง</span><input id="pName" type="text" maxlength="40" placeholder="เช่น ทริปเขาใหญ่" value="${esc(ps.name)}"></label>`}
       <label class="field" style="flex:1"><span class="lbl">${add ? 'เก็บเพิ่มคนละ (บาท)' : 'ลงคนละ (บาท)'}</span><input id="pEach" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(ps.each)}"></label>
     </div>
+    ${add ? '' : `<label class="sec" style="padding:12px 14px;display:flex;gap:10px;align-items:center"><span class="mid"><span class="nm">💱 ทริปต่างประเทศ</span><span class="lbl" style="display:block">บิลจากกองใส่ยอดเป็นสกุลนี้ เงินลงกองยังเป็นบาท</span></span><select id="pFx" style="border:1px solid var(--line);border-radius:10px;background:var(--card);font:inherit;color:inherit;padding:6px 8px"><option value="">บาท</option>${FX.map(x => `<option value="${x[0]}" ${ps.fx && ps.fx.code === x[0] ? 'selected' : ''}>${x[1]} ${x[2]}</option>`).join('')}</select></label>
+    ${ps.fx ? `<label class="sec field" style="padding:12px 14px"><span class="lbl">เรต 1 ${esc(ps.fx.code)} = กี่บาท</span><input id="pFxRate" class="num" type="text" inputmode="decimal" value="${esc(String(ps.fx.rate))}"></label>` : ''}`}
     ${add ? '' : `<button type="button" class="sec row-btn pl-sw" id="pEq" aria-pressed="${ps.equal}"><span class="sw" aria-hidden="true"></span><span class="mid"><span class="nm">หารเท่ากันทั้งกอง</span><span class="lbl">${ps.equal ? 'ไปด้วยกันทุกที่ ทุกบิลหารเท่ากันทุกคนในกอง เหลือคืนตามที่ลง ขาดเติมเท่ากัน' : 'ปิดอยู่: แต่ละบิลเลือกคนและวิธีหารเองได้ (เช่น มีคนไม่ได้กินบางมื้อ)'}</span></span></button>`}
     <div class="sec list">
       <div class="item"><div class="mid"><div class="nm">${esc(home.me.disp || 'ฉัน')} (ฉัน)</div><div class="lbl">ถือเงินกอง · ส่วนที่ฉันลงเอง</div></div><input class="amt-in num" data-pmy inputmode="decimal" placeholder="0" value="${esc(ps.my)}"></div>
       ${ps.people.map((p, i) => `<div class="item ${p.on ? '' : 'dim'}"><button type="button" class="chk" data-pon="${i}" aria-pressed="${p.on}" aria-label="${esc(p.name)} ลงกอง">${p.on ? '✓' : ''}</button><div class="mid"><div class="nm">${esc(p.name)}</div>${p.inPool ? '<div class="lbl">อยู่ในกองแล้ว</div>' : add && p.on ? '<div class="lbl">คนใหม่</div>' : ''}</div>${p.on ? `<input class="amt-in num" data-pin="${i}" inputmode="decimal" placeholder="0" value="${esc(p.inS)}">` : ''}</div>`).join('') || '<div class="empty">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวักก่อน</div>'}
     </div>`;
   const A = $('#app');
-  if (!add) { $('#pName').oninput = e => { ps.name = e.target.value; }; $('#pEq').onclick = () => { ps.equal = !ps.equal; drawPoolNew(); }; }
+  if (!add) {
+    $('#pName').oninput = e => { ps.name = e.target.value; }; $('#pEq').onclick = () => { ps.equal = !ps.equal; drawPoolNew(); };
+    $('#pFx').onchange = e => { const c = e.target.value; ps.fx = c ? { code: c, rate: fxLast(c) || fxOf(c)[3] } : null; drawPoolNew(); };
+    const pr = $('#pFxRate'); if (pr) pr.oninput = e => { const v = Number(String(e.target.value).replace(/[^\d.]/g, '')); if (v > 0) { ps.fx.rate = v; fxLast(ps.fx.code, v); } };
+  }
   $('#pEach').oninput = e => { ps.each = e.target.value; if (!add) { ps.my = ps.each; A.querySelector('[data-pmy]').value = ps.each; } ps.people.forEach(p => { if (p.on) p.inS = ps.each; }); A.querySelectorAll('[data-pin]').forEach(i => { i.value = ps.each; }); sumFoot(); };
   A.querySelector('[data-pmy]').oninput = e => { ps.my = e.target.value; sumFoot(); };
   A.querySelectorAll('[data-pon]').forEach(b => b.onclick = () => { const p = ps.people[+b.dataset.pon]; p.on = !p.on; if (p.on && !p.inS) p.inS = ps.each; drawPoolNew(); });
@@ -635,7 +782,7 @@ function drawPoolNew() {
     if (!members.length) { toast('แตะเลือกเพื่อนที่ลงกองอย่างน้อย 1 คน'); return; }
     const b = $('#pGo'); busy(b, true);
     try {
-      const d = await call('hk_pool_new', { name: ps.name.trim(), myInS: toS(ps.my), members: members, equal: ps.equal });
+      const d = await call('hk_pool_new', { name: ps.name.trim(), myInS: toS(ps.my), members: members, equal: ps.equal, fx: ps.fx || null });
       const sent = d.msg ? await postToChat(d.msg) : true;
       toast(sent ? 'สร้างกองแล้ว ส่งบิลลงกองเข้ากลุ่มแล้ว' : 'สร้างกองแล้ว');
       await loadHome();
@@ -682,7 +829,7 @@ function drawPool() {
   const mine = P.rows.find(r => r.me);
   $('#app').innerHTML = `
     ${view.unsent ? `<div class="err">ยังไม่ได้ส่งการ์ดเข้ากลุ่ม <button type="button" class="lnk" id="pResend" style="padding:0">ส่งเข้ากลุ่ม</button></div>` : ''}
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(P.name)}</h1><div class="sub">${esc(P.holder)}ถือเงินกอง${P.equal ? ' · หารเท่ากันทั้งกอง' : ''}</div></div><span class="pill ${open ? 'ink' : 'soft'}">${open ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></div>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(P.name)}</h1><div class="sub">${esc(P.holder)}ถือเงินกอง${P.equal ? ' · หารเท่ากันทั้งกอง' : ''}${P.fx ? ' · 💱 ' + esc(fxTxt(P.fx)) : ''}</div></div><span class="pill ${open ? 'ink' : 'soft'}">${open ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></div>
     ${!open && mine && !mine.holder && mine.topup === 'wait' && P.topup ? `<button type="button" class="btn ink" id="pTop">เติมกอง ${baht(-mine.balS)} → ${esc(P.holder)}</button>` : ''}
     <div class="hero">
       <div class="sec"><div class="lbl">ลงกองแล้ว</div><div class="big">${baht(P.inS)}</div><div class="lbl">ใช้ไป ${baht(P.spentS)}</div></div>
@@ -748,6 +895,7 @@ function poolCs(P) {
   P.members.forEach(m => { if (!cs.people.some(p => p.uid === m.uid)) cs.people.push({ key: m.uid, uid: m.uid, name: m.name, on: true, units: 2, custom: '' }); });
   cs.people.forEach(p => { p.on = cs.edit ? (p.me || had.has(p.uid)) : true; });
   cs.poolEq = !!P.equal; cs.poolN = P.members.length + 1;
+  if (P.fx && !cs.edit) cs.fx = { code: P.fx.code, rate: P.fx.rate };
   if (cs.poolEq) { cs.mode = 'equal'; cs.people.forEach(p => { p.on = true; }); }
 }
 function poolBillMenu(P, id) {
@@ -779,9 +927,9 @@ function groupsOf(bill) {   // รวมแถวตามคนที่ต้�
 /** 🧩 รายการในบิล + 🧮 ราคาต่อหน่วย (คนจ่ายก่อนเห็นยอดรายการ · เพื่อนเห็นส่วนของตัวเองในแต่ละรายการ) */
 function calcTxt(x) { return x && x.rateS ? esc(x.unit || 'หน่วย') + 'ละ ' + baht(x.rateS) + (x.qty ? ' × ' + x.qty + ' ' + esc(x.unit || '') : '') : ''; }
 function partsView(b) {
-  if (b.parts && b.parts.length) return `<div class="sec list"><div class="sec-h">รายการในบิลนี้${b.isPayer ? '' : ' (ส่วนของฉัน)'}</div>${b.parts.map(pt => { const c = catOf(pt.cat); const ct = calcTxt(pt);
+  if (b.parts && b.parts.length) return (b.fx ? `<div class="lbl">💱 ยอดเดิม ${esc(fxTxt(b.fx, b.fx.origS))} · แปลงเป็นบาทแล้ว</div>` : '') + `<div class="sec list"><div class="sec-h">รายการในบิลนี้${b.isPayer ? '' : ' (ส่วนของฉัน)'}</div>${b.parts.map(pt => { const c = catOf(pt.cat); const ct = calcTxt(pt);
     return `<div class="item"><span class="pl-ic" aria-hidden="true">${c ? c[1] : '🧾'}</span><div class="mid"><div class="nm">${esc(pt.name)}</div><div class="lbl">${[ct, !b.isPayer && pt.units ? pt.units + ' ' + esc(pt.unit) : ''].filter(Boolean).join(' · ') || (c ? esc(c[2]) : '')}</div></div><div class="amt">${baht(b.isPayer ? pt.totalS : pt.mineS)}</div></div>`; }).join('')}</div>`;
-  return b.calc && b.calc.rateS ? `<div class="lbl">🧮 ${calcTxt(Object.assign({}, b.calc, { unit: b.calc.unit || b.unit }))}</div>` : '';
+  return (b.fx ? `<div class="lbl">💱 ยอดเดิม ${esc(fxTxt(b.fx, b.fx.origS))}</div>` : '') + (b.calc && b.calc.rateS ? `<div class="lbl">🧮 ${calcTxt(Object.assign({}, b.calc, { unit: b.calc.unit || b.unit }))}</div>` : '');
 }
 function drawTrack() {
   const b = view.bill;
@@ -956,7 +1104,7 @@ async function loadQrImg() {
 }
 function saveQr() {
   payCanvas.toBlob(async blob => {
-    const file = new File([blob], 'qr-' + plain(view.bill.dueS) + '.png', { type: 'image/png' });
+    const file = new File([blob], 'qr-' + plain(view.bill ? view.bill.dueS : view.x ? view.x.netS : 0) + '.png', { type: 'image/png' });
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; } } catch (e) { if (e.name === 'AbortError') return; }
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     toast('ถ้าบันทึกไม่ได้ ให้กดค้างที่รูป QR แล้วเลือกบันทึกรูป');
