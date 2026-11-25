@@ -2,7 +2,8 @@
  * แมวกวัก — 🤝 ค้างกัน (ยืม / ให้ยืม / หารค่าใช้จ่าย)
  * เก็บเป็นเอกสาร JSON ต่อแถวในแท็บ "Owe" · คำนวณยอดหาร/หักลบที่ฝั่งแอป
  *   kind=debt  : รายการค้างระหว่างเรากับคนหนึ่ง {person, dir:'they'|'me', amount, payments[], status, splitId?}
- *   kind=split : บิลหารกัน/ทริป {title, people[], bills[], transfers[], moneyId}
+ *   kind=split : บิลหารกัน/ทริป {title, cat, people[], bills[], transfers[], moneyId, tplId?}
+ *   kind=tpl   : ชุดของกลุ่ม {name, cat, people[], bills[], monthly (วันที่ของเดือน 0=ไม่เตือน), lastRemind 'yyyy-MM'}
  */
 
 const OWE_SHEET = 'Owe';
@@ -41,7 +42,7 @@ function oweSave_(docs) {
   if (!Array.isArray(docs)) docs = [docs];
   const sh = oweSheet_(), now = stamp_(), out = [];
   docs.forEach(d => {
-    if (!d || !/^(debt|split)$/.test(d.kind)) throw new Error('ข้อมูลไม่ถูกต้อง');
+    if (!d || !/^(debt|split|tpl)$/.test(d.kind)) throw new Error('ข้อมูลไม่ถูกต้อง');
     const id = /^[A-Za-z0-9]{8,64}$/.test(String(d.id || '')) ? String(d.id) : Utilities.getUuid().replace(/-/g, '');
     const doc = Object.assign({}, d, { id: id });
     delete doc.updated;
@@ -226,4 +227,24 @@ function oweDueLine_() {
   return '🤝 ถึงวันนัดคืน\n' + due.slice(0, 8).map(d => '• ' + (d.dir === 'they' ? d.person + ' ค้างเรา ' : 'เราค้าง ' + d.person + ' ') + oweB_(oweLeftS_(d)) +
     (d.due < today ? ' (เลยนัด ' + daysBetween_(d.due, today) + ' วัน)' : ' (วันนี้)') + (d.title ? ' · ' + d.title : '')).join('\n') +
     (due.some(d => d.dir === 'they') ? '\nทวงได้ในแอป หน้า 💰 → 🤝 ค้างกัน → 💬 ทวง' : '');
+}
+
+/** 🗓 ชุดที่หารทุกเดือน: ถึงวันที่ตั้งไว้ (ตั้งแต่ 9 โมง) → เตือนเจ้าของใน LINE พร้อมลิงก์เปิดบิลใหม่ · เดือนละครั้งต่อชุด */
+function splitMonthly_() {
+  const now = new Date();
+  if (Number(Utilities.formatDate(now, TZ, 'HH')) < 9) return;
+  const ym = Utilities.formatDate(now, TZ, 'yyyy-MM'), day = Number(Utilities.formatDate(now, TZ, 'dd'));
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+  const last = new Date(y, m, 0).getDate();
+  const all = oweAll_();
+  const due = all.filter(t => t.kind === 'tpl' && Number(t.monthly) > 0 && t.lastRemind !== ym && Math.min(Number(t.monthly), last) <= day
+    && !all.some(s => s.kind === 'split' && s.tplId === t.id && String(s.date).slice(0, 7) === ym));
+  if (!due.length) return;
+  due.forEach(t => {
+    const names = (t.people || []).filter(p => p !== 'ฉัน');
+    const amt = (t.bills || []).reduce((s, b) => s + (Number(b.total) || 0) + (b.lines || []).reduce((x, l) => x + (l.rate ? 0 : Number(l.price) || 0), 0), 0);
+    push_('🗓 ถึงรอบหาร "' + t.name + '" ของเดือนนี้' + (amt ? ' ยอด ' + amt.toLocaleString('th-TH') + ' บาท' : '') +
+      (names.length ? '\nกับ ' + names.join(', ') : '') + '\nแตะเพื่อสร้างบิล: ' + APP_URL + 'split.html?tpl=' + t.id);
+  });
+  oweSave_(due.map(t => Object.assign({}, t, { lastRemind: ym })));
 }

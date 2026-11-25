@@ -5,7 +5,7 @@
  * - สรุปเงินตอนเช้า + เตือนหารในกลุ่ม + สำรองชีตทุกสัปดาห์
  */
 
-const BACKEND_VER = 6;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
+const BACKEND_VER = 7;   // เพิ่มทุกครั้งที่ deploy (โชว์ในหน้าสถานะระบบ)
              // ดึงประชุมล่วงหน้ากี่วัน
 // ปฏิทินที่ดึงผ่านสะพาน (Bridge.gs ในบัญชีอื่น) ตั้งค่าใน Script properties: BRIDGE_URL, BRIDGE_KEY
 const BRIDGE_LABEL = 'พี่วุฒิ';
@@ -229,6 +229,7 @@ function checkReminders() {
     props.setProperty('LAST_TICK', stamp_());   // หน้าสถานะระบบ: รอบเตือนล่าสุด
     try { grpDaily_(); } catch (e) { console.warn('grpDaily: ' + e); }        // 👥 เตือนคนที่ยังไม่จ่ายในกลุ่ม 10:00
     try { weeklyBackup_(); } catch (e) { console.warn('backup: ' + e); }     // 💾 สำรองชีตทุกวันอาทิตย์
+    try { splitMonthly_(); } catch (e) { console.warn('splitMonthly: ' + e); }  // 🗓 ชุดที่หารทุกเดือน
   } finally {
     lock.releaseLock();
   }
