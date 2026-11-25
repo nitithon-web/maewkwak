@@ -1,0 +1,546 @@
+/**
+ * แมวกวัก — อ่านใบเสร็จ / สลิป / ใบกำกับภาษี ด้วย AI (Google Gemini) แทน OCR + กฎเดา
+ * ตั้งค่า: Script Properties → GEMINI_API_KEY (สร้างที่ Google AI Studio) · GEMINI_MODEL (ไม่ใส่ = gemini-3.8-flash)
+ * ไม่มี key / AI ล่ม → กลับไปใช้ OCR ของ Drive แบบเดิมให้อัตโนมัติ
+ */
+
+const AI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];   // lite: ~4 วิ แม่นพอ · 3.8-flash ช้า/คนใช้เยอะ ใช้สำรอง
+let AI_ERRS = [];   // ข้อผิดพลาดล่าสุด (ไว้ดูตอนทดสอบ)
+
+/** อ่านเอกสาร: AI ก่อน ถ้าไม่ได้ค่อยใช้ OCR เดิม · คืนรูปแบบเดียวกับ readReceipt_ (+ ช่องเสริม) */
+function readDoc_(file, ctx) {
+  const ai = aiRead_(file, ctx || {});
+  if (ai) return ai;
+  let text = '';
+  try { text = ocrText_(file); } catch (e) {}
+  const o = readReceipt_(text);
+  o.via = 'ocr';
+  o.memo = slipMemo_(text);
+  o.text = String(text).slice(0, 1500);
+  o.kind = text ? guessKind_(text) : '';
+  return o;
+}
+
+function aiRead_(file, ctx) {
+  ctx = ctx || {};
+  const key = props.getProperty('GEMINI_API_KEY');
+  if (!key) return null;
+  const blob = file.getBlob ? file.getBlob() : file;
+  const mime = String(blob.getContentType() || 'image/jpeg');
+  if (!/^(image\/(jpeg|png|webp|heic|heif)|application\/pdf)$/.test(mime)) return null;
+  const bytes = blob.getBytes();
+  if (bytes.length > 15 * 1024 * 1024) return null;
+
+  const today = todayStr_();
+  const cats = ctx.cats && ctx.cats.length ? ctx.cats : [];
+  const prompt = [
+    'คุณคือผู้ช่วยบัญชีที่อ่านเอกสารการเงินภาษาไทย/อังกฤษจากรูปได้แม่นยำมาก',
+    'อ่านรูปนี้แล้วตอบเป็น JSON ตาม schema เท่านั้น ห้ามเดาข้อมูลที่ไม่มีในรูป (ไม่แน่ใจให้เว้นว่าง "" หรือ 0)',
+    'กติกา:',
+    '- kind: receipt=ใบเสร็จ/บิลร้าน, tax_invoice=ใบกำกับภาษี, slip=สลิปโอนเงิน/QR, invoice=ใบแจ้งหนี้/ใบวางบิล, quotation=ใบเสนอราคา, other=อื่นๆ (ไม่ใช่เอกสารการเงิน)',
+    '- date: วันที่ทำรายการ รูปแบบ YYYY-MM-DD เป็น ค.ศ. เสมอ (ปี พ.ศ. ลบ 543 เช่น 2569→2026, ปีย่อ 69→2026) วันนี้คือ ' + today + ' ถ้าได้วันที่อนาคตแปลว่าอ่านผิด',
+    '- time: HH:MM ถ้ามี',
+    '- amount: ยอดที่จ่ายจริงสุดท้าย (หลังส่วนลด รวม VAT/service) เป็นตัวเลขล้วน ห้ามเอาเงินที่ลูกค้าให้มาหรือเงินทอน สลิปโอนเงิน = จำนวนเงินที่โอน',
+    '- vendor: ชื่อร้าน/บริษัทผู้ขาย (ไม่ใช่ชื่อสาขา ไม่ใช่ที่อยู่) สลิปโอน = ชื่อผู้รับเงิน',
+    '- memo: ข้อความบันทึก/โน้ตที่คนโอนพิมพ์ไว้เองในสลิป (ช่อง บันทึกช่วยจำ, บันทึก, ข้อความ, หมายเหตุ, Note, Memo, รายละเอียด) คัดลอกตามที่เขียนทุกตัวอักษร ไม่มีให้ ""',
+    '- desc: สรุปสั้นๆ ภาษาไทยว่าจ่าย/รับค่าอะไร ไม่เกิน 40 ตัวอักษร ถ้ามี memo ให้ยึดตาม memo เป็นหลัก (เช่น memo "เงินค่าห้อง พ.ย." → desc "ค่าห้อง พ.ย.") ไม่มี memo ค่อยสรุปจากรายการสินค้า เช่น "ค่าอาหารกลางวัน", "ค่าน้ำมันรถ"',
+    '- cat: ถ้ามี memo ให้ใช้ memo ช่วยเลือกหมวดด้วย',
+    '- vat: yes ถ้ามีการแสดงภาษีมูลค่าเพิ่ม/VAT หรือเป็นใบกำกับภาษี, no ถ้าไม่มี · vat_amount: ยอด VAT ถ้ามี · prices_include_vat: ราคาสินค้าแต่ละรายการรวม VAT แล้วหรือยัง',
+    '- service_charge, discount: ยอดเงิน (ไม่ใช่ %) ถ้ามี · discount ระดับบิล = เฉพาะส่วนลดท้ายบิลที่ไม่ได้ผูกกับสินค้าชิ้นใด (ส่วนลดที่ผูกกับสินค้าให้ใส่ใน items[].discount แทน ห้ามนับซ้ำ)',
+    '- items: รายการสินค้า/เมนูทุกบรรทัด ชื่อตามที่เขียน qty จำนวน price = ราคารวมของบรรทัดนั้นก่อนหักส่วนลด (ไม่ใช่ราคาต่อหน่วย) ไม่ต้องใส่บรรทัดยอดรวม/ภาษี/ส่วนลดเป็นรายการแยก',
+    '- items[].discount: ส่วนลดของสินค้าชิ้นนั้น เป็นยอดบวก เช่นบรรทัด "ส่วนลด -8" หรือโปร/คูปองที่อยู่ใต้สินค้าหรือระบุชื่อสินค้า (ส่วนลด % ให้คำนวณเป็นบาท) · items[].discount_note: ชื่อส่วนลด/โปรตามที่เขียน ไม่มีให้ ""',
+    '- ใบเสร็จร้านสะดวกซื้อ/ห้าง (เช่น 7-Eleven, Lotus, Big C, Tops) มักพิมพ์ "ยอดรวม" ก่อน แล้วตามด้วยบรรทัดส่วนลด/โปร/คูปอง (ติดลบ) แล้วจึง "ยอดสุทธิ/รับเงิน/เงินสด" · amount ต้องเป็นยอดหลังหักส่วนลดทุกบรรทัดเสมอ ไม่ใช่ "ยอดรวม" ก่อนลด',
+    '- บรรทัดส่วนลดที่ระบุชื่อสินค้า (เช่น "ส่วนลดน้ำแร่", "7ลดไอศกรีม", "AMBลด…", "คูปองชีสไบท์") ให้ใส่เป็น items[].discount ของสินค้าชื่อนั้น ห้ามใส่เป็นสินค้าแยกหรือราคาติดลบ · ส่วนลดที่ไม่ระบุสินค้า (คูปองท้ายบิล แต้ม The1/สมาชิก Meal Deal ส่วนลดค่าส่ง) = discount ระดับบิล',
+    '- ซื้อ 1 แถม 1 / ซื้อคู่ถูกกว่า: ใส่สินค้าตามจำนวนจริงและราคาเต็ม แล้วใส่ส่วนที่ลดเป็น items[].discount ของสินค้านั้น',
+    '- บรรทัดราคา 0.00 (ของแถม แสตมป์ แต้มสะสม กิจกรรม ข้อความโปร) และบรรทัดยอดรวม/เงินที่รับ/เงินทอน/VAT ไม่ต้องใส่ใน items',
+    '- แอปส่งอาหาร (Grab, LINE MAN, foodpanda, Robinhood, ShopeeFood): items = เมนู · ค่าส่ง+ค่าบริการแพลตฟอร์ม+ค่ากล่อง รวมกันเป็น service_charge · โปร/ส่วนลดค่าส่ง/โค้ด = discount',
+    '- ร้านอาหารที่บวก service charge 10% และ/หรือ VAT 7% ท้ายบิล: ราคาเมนูยังไม่รวม → prices_include_vat=false และใส่ vat_amount, service_charge ตามที่พิมพ์',
+    '- ตรวจก่อนตอบทุกครั้ง: ผลรวมของ (price − discount) ทุกรายการ − discount + service_charge (+ vat_amount เฉพาะเมื่อ prices_include_vat=false) ต้องเท่ากับ amount ถ้าไม่เท่า ให้อ่านรูปใหม่หาบรรทัดที่ตกหล่น/อ่านเลขผิด/ส่วนลดที่หายไป จนกว่าจะตรง (ถ้าตรวจแล้วยังไม่ตรงจริงๆ ให้ยึด amount ตามที่พิมพ์ในรูป)',
+    '- pay: วิธีจ่าย เลือกจาก "เงินสด","โอน","QR/พร้อมเพย์","บัตรเครดิต","บัตรเดบิต","" · สลิปโอน = "โอน"',
+    '- payer / payee / bank / ref: สำหรับสลิป (ชื่อผู้โอน ผู้รับ ธนาคาร เลขอ้างอิง)',
+    '- tax_id: เลขประจำตัวผู้เสียภาษีของผู้ขาย 13 หลักถ้ามี',
+    cats.length ? '- cat: เลือกหมวดที่เหมาะที่สุดจากรายการนี้เท่านั้น: ' + cats.join(', ') + ' (ไม่เข้าหมวดไหนให้ "")' : '- cat: ""',
+    '- confidence: ความมั่นใจโดยรวม 0-1',
+  ].join('\n');
+
+  const S = (type, extra) => Object.assign({ type: type }, extra || {});
+  const schema = S('OBJECT', {
+    properties: {
+      kind: S('STRING', { enum: ['receipt', 'tax_invoice', 'slip', 'invoice', 'quotation', 'other'] }),
+      date: S('STRING'), time: S('STRING'), amount: S('NUMBER'), vendor: S('STRING'), desc: S('STRING'),
+      vat: S('STRING', { enum: ['yes', 'no', 'unknown'] }), vat_amount: S('NUMBER'), prices_include_vat: S('BOOLEAN'),
+      service_charge: S('NUMBER'), discount: S('NUMBER'),
+      items: S('ARRAY', { items: S('OBJECT', { properties: { name: S('STRING'), qty: S('NUMBER'), price: S('NUMBER'), discount: S('NUMBER'), discount_note: S('STRING') }, required: ['name', 'price'] }) }),
+      pay: S('STRING'), memo: S('STRING'), payer: S('STRING'), payee: S('STRING'), bank: S('STRING'), ref: S('STRING'), tax_id: S('STRING'),
+      cat: S('STRING'), confidence: S('NUMBER'),
+    },
+    required: ['kind', 'date', 'amount', 'vendor', 'desc', 'vat', 'items', 'confidence'],
+  });
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mime, data: Utilities.base64Encode(bytes) } }, { text: prompt }] }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
+  };
+  const models = ctx.models || aiModels_();
+  const start = Date.now();
+  const r1 = aiCall_(models, body, key, start, ctx);
+  if (!r1) { if (!ctx.models && !ctx.noHealth) aiHealthDone_(false); return null; }
+  let o = aiNormalize_(r1.j, cats, r1.model);
+  // ✅ ตรวจตัวเอง: รายการรวมแล้วไม่เท่ายอดจ่าย → ให้ AI อ่านใบเดิมซ้ำอีกรอบ พร้อมบอกว่าต่างกันเท่าไหร่
+  if (o.check && !o.check.ok && !ctx.noRetry && Date.now() - start < 35000) {
+    const fix = JSON.parse(JSON.stringify(body));
+    fix.contents[0].parts[1].text = prompt + '\n\n' + aiFixNote_(o);
+    const r2 = aiCall_([r1.model], fix, key, start, ctx);
+    if (r2) {
+      const o2 = aiNormalize_(r2.j, cats, r2.model);
+      if (o2.check) o2.check.pass = 2;
+      if (!o2.check || o2.check.ok || Math.abs(o2.check.diff) < Math.abs(o.check.diff)) o = o2;
+      else o.check.retry = o2.check.diff;
+    }
+  }
+  if (!ctx.models && !ctx.noHealth) aiHealthDone_(true);
+  return o;
+}
+
+/** เรียก Gemini ตามลำดับรุ่น (ลองซ้ำเมื่อคนใช้เยอะ) → { j, model } หรือ null */
+function aiCall_(models, body, key, start, ctx) {
+  for (const model of models) {
+    if (Date.now() - start > 60000) { AI_ERRS.push('หมดเวลา ข้าม ' + model); break; }   // อย่าให้ผู้ใช้รอนานเกินไป
+    try {
+      const think = ctx.think === undefined ? 'low' : ctx.think;
+      const req = JSON.parse(JSON.stringify(body));
+      if (think && /^gemini-[3-9]/.test(model)) req.generationConfig.thinkingConfig = { thinkingLevel: think };   // คิดน้อย = เร็วขึ้นมาก
+      let r = aiFetch_(model, req, key);
+      if ((r.getResponseCode() === 429 || r.getResponseCode() === 503) && Date.now() - start < 30000) { Utilities.sleep(2500); r = aiFetch_(model, req, key); }   // คนใช้เยอะ/ถี่ไป รอแป๊บแล้วลองอีกครั้ง
+      if (r.getResponseCode() === 400 && /thinking/i.test(r.getContentText())) { delete req.generationConfig.thinkingConfig; r = aiFetch_(model, req, key); }
+      const code = r.getResponseCode();
+      if (code !== 200) { AI_ERRS.push(model + ' ' + code + ': ' + r.getContentText().slice(0, 300)); console.warn('Gemini ' + model + ' ' + code); continue; }   // ลองรุ่นถัดไป
+      const res = JSON.parse(r.getContentText());
+      const txt = (((res.candidates || [])[0] || {}).content || {}).parts;
+      const raw = (txt || []).map(p => p.thought ? '' : (p.text || '')).join('');
+      return { j: JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim()), model: model };
+    } catch (e) { AI_ERRS.push(model + ' error: ' + e); console.warn('Gemini ' + model + ' error: ' + e); }
+  }
+  return null;
+}
+
+/** ข้อความบอก AI ในรอบอ่านซ้ำ: รอบแรกอ่านได้อะไร และต่างจากยอดจ่ายเท่าไหร่ */
+function aiFixNote_(o) {
+  const c = o.check, f = x => Math.round(x * 100) / 100;
+  const list = o.items.map(it => it.name + ' ' + f(it.price) + (it.disc ? ' ลด ' + f(it.disc) : '')).join(' | ');
+  return ['รอบก่อนคุณอ่านได้: ' + list,
+    'ส่วนลดท้ายบิล ' + f(o.discount) + ' · ค่าบริการ ' + f(o.service) + (o.pricesIncVat ? '' : ' · VAT ' + f(Number(o.vatAmt) || 0)) + ' · amount ' + o.amount,
+    'แต่ผลรวมรายการสุทธิ = ' + f(c.expect) + ' ไม่เท่ากับ amount (ต่างกัน ' + f(c.diff) + ' บาท) แปลว่ามีบางอย่างผิด เช่น ตกบรรทัด อ่านราคาผิด ส่วนลดหาย/นับซ้ำ จำนวนชิ้นผิด หรือ amount ไม่ใช่ยอดที่จ่ายจริง',
+    'อ่านรูปใหม่อย่างละเอียดทีละบรรทัด แล้วตอบ JSON ใหม่ทั้งหมดตาม schema'].join('\n');
+}
+
+/* ===================== 🩺 สุขภาพ AI: นับสำเร็จ/ล่มรายวัน · เตือน LINE · สลับรุ่นเอง ===================== */
+function aiHealth_() {
+  let h = {};
+  try { h = JSON.parse(props.getProperty('AI_HEALTH') || '{}') || {}; } catch (e) { h = {}; }
+  const d = todayStr_();
+  if (h.d !== d) h = { d: d, ok: 0, fail: 0, m: {}, last: h.last || null, prev: h.d ? { d: h.d, ok: h.ok || 0, fail: h.fail || 0 } : (h.prev || null) };
+  h.m = h.m || {};
+  return h;
+}
+function aiHealthSave_(h) { try { props.setProperty('AI_HEALTH', JSON.stringify(h).slice(0, 8000)); } catch (e) {} }
+/** ผลของแต่ละครั้งที่เรียกรุ่นหนึ่ง (เรียกจาก aiFetch_) */
+function aiHealthModel_(model, code, text) {
+  if (code === 400 && /thinking/i.test(text || '')) return;   // แค่รุ่นนี้ไม่รับตัวเลือก thinking ระบบลองใหม่ให้เอง
+  try {
+    const h = aiHealth_(), x = h.m[model] = h.m[model] || { ok: 0, fail: 0 };
+    if (code === 200) x.ok++;
+    else { x.fail++; h.last = { t: stamp_(), model: model, code: code, msg: aiErrShort_(code, text) }; }
+    aiHealthSave_(h);
+  } catch (e) {}
+}
+function aiErrShort_(code, text) {
+  let m = '';
+  try { m = String((JSON.parse(text || '{}').error || {}).message || ''); } catch (e) { m = String(text || ''); }
+  const k = code === 429 ? 'ใช้ถี่/โควตาเต็ม' : code === 503 ? 'คนใช้เยอะ (503)' : code === 403 ? 'key ใช้ไม่ได้' : code === 404 ? 'ไม่มีรุ่นนี้' : code ? 'error ' + code : 'ติดต่อไม่ได้';
+  return (k + (m ? ': ' + m : '')).replace(/AIza[\w-]+/g, '…').slice(0, 140);
+}
+/** ผลรวมของงานอ่านหนึ่งครั้ง (ทุกรุ่นพังหมด = ล่ม 1 ครั้ง) · ล่มครบ 3 ครั้งในวันเดียว เตือนเจ้าของทาง LINE วันละครั้ง */
+function aiHealthDone_(ok) {
+  try {
+    const h = aiHealth_();
+    if (ok) h.ok++; else h.fail++;
+    let alert = false;
+    if (!ok && h.fail >= 3 && !h.alerted) { h.alerted = 1; alert = true; }
+    aiHealthSave_(h);
+    if (alert) push_('⚠️ AI อ่านใบเสร็จไม่ตอบ ' + h.fail + ' ครั้งแล้ววันนี้' + (h.last ? '\nล่าสุด: ' + h.last.model + ' ' + h.last.msg : '') +
+      '\nระบบอ่านแบบเดิม (ได้แค่ยอดรวม) ไปก่อน และจะลองรุ่นสำรองให้เอง\nดูรายละเอียดที่ 🩺 สถานะระบบ');
+  } catch (e) {}
+}
+/** ลำดับรุ่นที่จะลอง: รุ่นหลักที่ล่มบ่อยวันนี้ (ล่ม ≥3 และมากกว่าที่สำเร็จ) ย้ายไปไว้ท้าย ให้รุ่นสำรองขึ้นก่อน */
+function aiModels_() {
+  const list = [props.getProperty('GEMINI_MODEL')].concat(AI_MODELS).filter((m, i, a) => m && a.indexOf(m) === i);
+  let h = null;
+  try { h = aiHealth_(); } catch (e) {}
+  if (!h) return list;
+  const bad = m => { const x = h.m[m]; return !!x && x.fail >= 3 && x.fail > x.ok; };
+  return list.filter(m => !bad(m)).concat(list.filter(bad));
+}
+function aiHealthInfo_() {
+  const h = aiHealth_(), order = aiModels_(), main = [props.getProperty('GEMINI_MODEL')].concat(AI_MODELS).filter(Boolean)[0];
+  return { d: h.d, ok: h.ok, fail: h.fail, models: h.m, last: h.last, prev: h.prev, use: order[0], switched: order[0] !== main, alerted: !!h.alerted };
+}
+
+/** แปลงผล AI ให้อยู่ในรูปแบบที่ระบบเดิมใช้ + ตรวจความสมเหตุสมผล */
+function aiNormalize_(j, cats, model) {
+  const n = v => { const x = Number(String(v == null ? '' : v).replace(/[,฿\s]/g, '')); return isFinite(x) && x > 0 ? Math.round(x * 100) / 100 : 0; };
+  let date = String(j.date || '').trim();
+  const m = date.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    let y = Number(m[1]); if (y > 2400) y -= 543;
+    date = y + '-' + pad_(m[2]) + '-' + pad_(m[3]);
+    const age = daysBetween_(date, todayStr_());
+    if (age < -1 || age > 800) date = '';          // อนาคต หรือเก่าเกินไป = น่าจะอ่านผิด
+  } else date = '';
+  const amount = n(j.amount);
+  const kind = { receipt: 'receipt', tax_invoice: 'taxinv', slip: 'slip', invoice: 'other', quotation: 'other', other: 'other' }[j.kind] || '';
+  const docType = String(j.kind || '');
+  const vat = j.vat === 'yes' || kind === 'taxinv' ? 'yes' : j.vat === 'no' ? 'no' : '';
+  let vatAmt = n(j.vat_amount);
+  if (vat === 'yes' && !vatAmt && amount) vatAmt = Math.round(amount * 7 / 107 * 100) / 100;
+  // บรรทัดส่วนลด/ราคาติดลบที่ AI แยกมาเป็นสินค้า → ย้ายไปเป็นส่วนลดของสินค้าชื่อเดียวกัน (ไม่เจอ = ส่วนลดท้ายบิล)
+  const raw = Array.isArray(j.items) ? j.items : [];
+  const num = v => { const x = Number(String(v == null ? '' : v).replace(/[,฿\s]/g, '')); return isFinite(x) ? x : 0; };
+  const isDiscLine = it => num(it.price) < 0 || (AI_DISC_RE.test(String(it.name || '')) && !n(it.discount));
+  const items = raw.filter(it => !isDiscLine(it)).map(it => {
+    const price = n(it.price), disc = Math.min(n(it.discount), price);
+    return { name: String(it.name || '').trim().slice(0, 60), qty: n(it.qty) || 1, price: price, disc: disc, discNote: String(it.discount_note || '').trim().slice(0, 40) };
+  }).filter(it => it.name && it.price).slice(0, 60);
+  let extraDisc = 0;
+  raw.filter(isDiscLine).forEach(it => {
+    const amt = Math.round(Math.abs(num(it.price)) * 100) / 100, name = String(it.name || '').trim().slice(0, 40);
+    if (!amt) return;
+    const t = aiDiscTarget_(name, items);
+    if (t && Math.abs(t.disc - amt) < 0.01) return;               // AI ใส่ส่วนลดนี้ไว้ที่สินค้าแล้ว ไม่นับซ้ำ
+    if (t && t.disc + amt <= t.price) { t.disc = Math.round((t.disc + amt) * 100) / 100; t.discNote = t.discNote ? t.discNote + ', ' + name : name; }
+    else extraDisc += amt;
+  });
+  // AI ใส่ส่วนลดซ้ำทั้งที่สินค้าและท้ายบิล → ตัดของท้ายบิลออก
+  const itemDisc = items.reduce((s, it) => s + it.disc, 0);
+  let billDisc = n(j.discount);
+  if (extraDisc && billDisc && Math.abs(billDisc - extraDisc) < 0.5) billDisc = 0;
+  if (itemDisc && billDisc && Math.abs(billDisc - itemDisc) < 0.5) billDisc = 0;
+  billDisc = Math.round((billDisc + extraDisc) * 100) / 100;
+  // ✅ ตรวจตัวเลข: (ราคา − ส่วนลด) ของทุกรายการ − ส่วนลดท้ายบิล + ค่าบริการ (+ VAT ถ้าราคายังไม่รวม) ต้องเท่ายอดจ่าย
+  const service = n(j.service_charge), incVat = j.prices_include_vat !== false;
+  const vatAdd = incVat ? 0 : n(j.vat_amount);   // ใช้เฉพาะยอด VAT ที่พิมพ์จริง ไม่ใช้ค่าประมาณ
+  const gross = items.reduce((s, it) => s + it.price, 0);
+  const r2 = x => Math.round(x * 100) / 100;
+  let amt = amount, check = null, fixed = '';
+  if (items.length && kind !== 'slip') {
+    const expect = r2(gross - itemDisc - billDisc + service + vatAdd);
+    // ยอดที่ AI ให้มาเท่ากับยอดก่อนหักส่วนลดพอดี (แบบ 7-Eleven) → ใช้ยอดหลังหักส่วนลด
+    if (amt && (itemDisc + billDisc) > 0 && Math.abs(amt - r2(gross + service + vatAdd)) < 0.5 && expect > 0) { amt = expect; fixed = 'ยอดก่อนลด → ยอดหลังลด'; }
+    if (!amt && expect > 0) { amt = expect; fixed = 'ไม่เจอยอดจ่าย ใช้ผลรวมรายการ'; }
+    const diff = r2(amt - expect);
+    check = { ok: Math.abs(diff) <= 1, diff: diff, expect: expect, pass: 1 };
+    if (fixed) check.fixed = fixed;
+  }
+  const cat = cats.length && cats.indexOf(String(j.cat || '')) > -1 ? String(j.cat) : '';
+  return {
+    via: 'ai', model: model, kind: kind, docType: docType, date: date, time: String(j.time || '').slice(0, 5),
+    amount: amt ? String(amt) : '', vendor: String(j.vendor || '').trim().slice(0, 80), desc: String(j.desc || '').trim().slice(0, 60),
+    vat: vat, vatAmt: vatAmt ? String(vatAmt) : '', pricesIncVat: incVat,
+    service: service, discount: billDisc, items: items, check: check,
+    memo: String(j.memo || '').trim().slice(0, 120), pay: String(j.pay || ''), payer: String(j.payer || '').slice(0, 80), payee: String(j.payee || '').slice(0, 80), bank: String(j.bank || '').slice(0, 40), ref: String(j.ref || '').slice(0, 40),
+    taxId: String(j.tax_id || '').replace(/\D/g, '').slice(0, 13), cat: cat, confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)),
+  };
+}
+
+const AI_DISC_RE = /^\s*(?:ส่วนลด|ลด\s|discount|disc\.?\s|โปรโมชั่น|โปร\s|คูปอง|coupon|[A-Za-z0-9]{1,6}\s?(?:ลด|คูปอง))/i;   // ตรงกับ owe.js / hk.js
+/** หาสินค้าที่บรรทัดส่วนลดพูดถึง เช่น "ส่วนลดน้ำแร่เพอร์ร่า" → "น้ำแร่เพอร์ร่า 1500" (ต้องมีคำร่วมกัน ≥4 ตัว) */
+function aiDiscTarget_(discName, list) {
+  const norm = t => String(t || '').toLowerCase().replace(AI_DISC_RE, '').replace(/^\s*\d+\s*[×x]\s*/, '').replace(/\d+\s*(บ|บาท)?$/, '').replace(/[^\p{L}\p{N}]+/gu, '');
+  const k = norm(discName);
+  if (k.length < 2) return null;
+  const common = (a, b) => { let best = 0; for (let i = 0; i < a.length; i++) for (let j = i + best + 1; j <= a.length; j++) { if (b.indexOf(a.slice(i, j)) > -1) best = j - i; else break; } return best; };
+  let pick = null, score = 0;
+  list.forEach(it => {
+    const nm = norm(it.name);
+    if (!nm) return;
+    const sc = nm.indexOf(k) > -1 || k.indexOf(nm) > -1 ? 99 : common(k, nm);
+    if (sc >= 4 && sc > score) { pick = it; score = sc; }
+  });
+  return pick;
+}
+
+/** หน้าหารกัน: อ่านใบเสร็จ (เก็บรูปไว้ในโฟลเดอร์รายรับรายจ่าย) แล้วส่งรายการเมนูกลับไป */
+function aiReadUpload_(p) {
+  const mime = String(p.mime || 'image/jpeg');
+  if (!/^(image\/|application\/pdf)/.test(mime)) throw new Error('รองรับเฉพาะรูปและ PDF');
+  const bytes = Utilities.base64Decode(String(p.data || ''));
+  if (bytes.length > 15 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 15MB');
+  const date = todayStr_();
+  const file = moneyFolder_(date.slice(0, 7)).createFile(Utilities.newBlob(bytes, mime, date + '_ใบเสร็จหาร' + (mime === 'application/pdf' ? '.pdf' : '.jpg')));
+  const ocr = readDoc_(file, { cats: [] });
+  return { ocr: ocr, file: { id: file.getId(), url: file.getUrl(), mime: mime, thumb: String(p.thumb || '').slice(0, 12000) }, ai: !!props.getProperty('GEMINI_API_KEY') };
+}
+
+/* ===================== 🧪 ชุดใบเสร็จตัวอย่าง (ใบที่ AI เคยอ่านผิด) ไว้ทดสอบซ้ำ ===================== */
+const AI_SAMPLE_SHEET = 'AiSamples', AI_SAMPLE_HEADERS = ['id', 'src', 'note', 'expect', 'added', 'last', 'lastAt'];
+function aiSampleSheet_() { return grpTab_(AI_SAMPLE_SHEET, AI_SAMPLE_HEADERS); }
+function aiSampleFolder_() {
+  const id = props.getProperty('AI_SAMPLE_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  const f = DriveApp.createFolder('แมวกวัก - ตัวอย่างใบเสร็จ AI');
+  props.setProperty('AI_SAMPLE_FOLDER_ID', f.getId());
+  return f;
+}
+function aiSamples_() {
+  const sh = aiSampleSheet_(), last = sh.getLastRow();
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, AI_SAMPLE_HEADERS.length).getValues().map((r, i) => ({ row: i + 2, id: String(r[0]), src: String(r[1]), note: String(r[2]), expect: Number(r[3]) || 0, added: String(r[4]), last: String(r[5]), lastAt: String(r[6]) })).filter(x => x.id);
+}
+/** ปุ่ม "AI อ่านผิด": สำเนารูปใบเสร็จเก็บเข้าชุดตัวอย่าง พร้อมยอดที่ถูก (ถ้าเจ้าของบอก) และหมายเหตุ */
+function aiFlag_(p) {
+  const srcId = String(p.fileId || '').trim();
+  if (!/^[\w-]{20,}$/.test(srcId)) throw new Error('ไม่มีรูปใบเสร็จ');
+  const note = String(p.note || '').trim().slice(0, 200), expect = Math.max(0, Number(String(p.amount || '').replace(/[,฿\s]/g, '')) || 0);
+  const sh = aiSampleSheet_(), old = aiSamples_().find(x => x.src === srcId || x.id === srcId);
+  if (old) {
+    if (note) sh.getRange(old.row, 3).setValue(note);
+    if (expect) sh.getRange(old.row, 4).setValue(String(expect));
+    return { id: old.id, count: aiSamples_().length, updated: true };
+  }
+  const src = DriveApp.getFileById(srcId);
+  const copy = src.makeCopy(todayStr_() + '_' + (note || src.getName()).replace(/[\\/:*?"<>|#]/g, ' ').slice(0, 40), aiSampleFolder_());
+  sh.appendRow([copy.getId(), srcId, note, expect ? String(expect) : '', stamp_(), '', '']);
+  return { id: copy.getId(), count: aiSamples_().length };
+}
+/** อ่านใบตัวอย่างทั้งชุดซ้ำด้วย AI ตัวปัจจุบัน (ทีละไม่เกิน 6 ใบต่อครั้ง ใช้ from ต่อ) · ไม่นับใน 🩺 สุขภาพ AI */
+function aiRegress_(p) {
+  const all = aiSamples_(), from = Math.max(0, Number(p && p.from) || 0), list = all.slice(from, from + 6), sh = aiSampleSheet_();
+  const t0 = Date.now(), results = [];
+  for (const x of list) {
+    if (Date.now() - t0 > 240000) break;
+    const out = { id: x.id, note: x.note, expect: x.expect };
+    try {
+      AI_ERRS = [];
+      const t1 = Date.now();
+      const o = aiRead_(DriveApp.getFileById(x.id), { cats: [], noHealth: true });
+      out.ms = Date.now() - t1;
+      if (!o) { out.ok = false; out.err = (AI_ERRS[0] || 'AI ไม่ตอบ').slice(0, 120); }
+      else {
+        const a = Number(o.amount) || 0, c = o.check;
+        out.amount = a; out.items = (o.items || []).length; out.disc = Math.round(((o.items || []).reduce((s, it) => s + (it.disc || 0), 0) + (o.discount || 0)) * 100) / 100;
+        out.check = c; out.model = o.model;
+        out.ok = (x.expect ? Math.abs(a - x.expect) <= 1 : true) && (!c || c.ok);
+      }
+    } catch (e) { out.ok = false; out.err = String(e.message || e).slice(0, 120); }
+    try { sh.getRange(x.row, 6, 1, 2).setValues([[JSON.stringify({ ok: out.ok, amount: out.amount, items: out.items, disc: out.disc, diff: out.check ? out.check.diff : null, err: out.err || '' }), stamp_()]]); } catch (e) {}
+    results.push(out);
+  }
+  const next = from + results.length < all.length ? from + results.length : 0;
+  return { total: all.length, from: from, next: next, pass: results.filter(r => r.ok).length, results: results };
+}
+
+function moneyCatList_(type) {
+  const base = (MONEY_CATS[type === 'in' ? 'in' : 'out'] || []).map(c => Array.isArray(c) ? c[0] : c);
+  return Array.from(new Set(base.concat(['อื่นๆ'])));
+}
+
+/** โน้ตที่ผู้โอนพิมพ์ไว้ในสลิป (OCR แบบเดิม) */
+function slipMemo_(text) {
+  const lines = String(text || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const KEY = /^(บันทึกช่วยจำ|บันทึก|ข้อความ|หมายเหตุ|รายละเอียด|note|memo)\s*[:：]?\s*/i;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(KEY);
+    if (!m) continue;
+    const v = lines[i].slice(m[0].length).trim() || (lines[i + 1] && !KEY.test(lines[i + 1]) ? lines[i + 1] : '');
+    if (v && !/^\d[\d,.\s]*$/.test(v)) return v.slice(0, 120);
+  }
+  return '';
+}
+
+/** ข้อความที่จะใช้เป็นรายละเอียด/โน้ต: โน้ตในสลิปก่อน แล้วค่อยเป็นสรุปของ AI + ชื่อร้าน/ผู้รับ */
+function docNote_(o) {
+  o = o || {};
+  const memo = String(o.memo || '').replace(/^(เงิน|โอน)\s*(?=ค่า)/, '').trim();
+  if (memo) return [memo, o.vendor && memo.indexOf(o.vendor) < 0 ? o.vendor : ''].filter(Boolean).join(' · ');
+  if (o.via === 'ai') return [o.desc, o.vendor].filter(Boolean).join(' · ');
+  return o.vendor || '';
+}
+
+/** ทดสอบเทียบ (อ่านอย่างเดียว ไม่บันทึกอะไร): ไฟล์ที่มีอยู่แล้วใน Drive → ผล OCR แบบเดิม vs AI */
+function aiCompare_(ids, data, mime) {
+  if (data) {   // ไฟล์ทดสอบที่ส่งมาตรงๆ: สร้างไฟล์ชั่วคราว อ่าน แล้วทิ้งลงถังขยะทันที
+    const tmp = DriveApp.createFile(Utilities.newBlob(Utilities.base64Decode(String(data)), String(mime || 'application/pdf'), 'ai-test-tmp'));
+    try { return aiCompare_([tmp.getId()]); } finally { try { tmp.setTrashed(true); } catch (e) {} }
+  }
+  const pick = o => o ? { kind: o.kind || '', date: o.date || '', amount: o.amount || '', vendor: o.vendor || '', desc: o.desc || '', memo: o.memo || '', vat: o.vat || '', cat: o.cat || '', discount: o.discount || 0, items: (o.items || []).map(i => [i.name, i.price, i.disc || 0]) } : null;
+  return (ids || []).slice(0, 4).map(id => {
+    const out = { id: id };
+    try {
+      const file = DriveApp.getFileById(id);
+      const t0 = Date.now();
+      let text = '';
+      try { text = ocrText_(file); } catch (e) {}
+      const old = readReceipt_(text); old.memo = slipMemo_(text);
+      out.old = pick(old); out.oldMs = Date.now() - t0;
+      const t1 = Date.now();
+      AI_ERRS = [];
+      out.ai = pick(aiRead_(file, { cats: moneyCatList_('out') }));
+      if (AI_ERRS.length) out.aiErr = AI_ERRS.slice(0, 4);
+      out.aiMs = Date.now() - t1;
+    } catch (e) { out.error = String(e.message || e); }
+    return out;
+  });
+}
+
+/** รวมยอดหลายเอกสาร: สลิปโอนที่ยอดเท่ากับใบเสร็จ/ใบกำกับในชุดเดียวกัน = จ่ายบิลเดียวกัน ไม่นับซ้ำ */
+function sumDocs_(os) {
+  const bills = os.filter(o => o.kind !== 'slip' && Number(o.amount) > 0).map(o => Number(o.amount));
+  let total = bills.reduce((s, x) => s + x, 0);
+  const left = bills.slice();
+  os.filter(o => o.kind === 'slip' && Number(o.amount) > 0).forEach(o => {
+    const a = Number(o.amount), i = left.findIndex(x => Math.abs(x - a) < 0.01);
+    if (i > -1) left.splice(i, 1); else total += a;
+  });
+  return Math.round(total * 100) / 100;
+}
+
+/** ตรวจการเชื่อมต่อ Gemini: รุ่นที่ใช้ได้ + ข้อความ error (ไม่คืนค่า key) */
+function aiDebug_() {
+  const key = props.getProperty('GEMINI_API_KEY');
+  if (!key) return { ok: false, msg: 'ไม่มี GEMINI_API_KEY' };
+  const out = { models: [], tries: [] };
+  try {
+    const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key }, muteHttpExceptions: true });
+    out.listCode = r.getResponseCode();
+    const j = JSON.parse(r.getContentText() || '{}');
+    out.models = (j.models || []).filter(m => (m.supportedGenerationMethods || []).indexOf('generateContent') > -1).map(m => String(m.name).replace('models/', ''));
+    if (j.error) out.listErr = String(j.error.message || '').slice(0, 300);
+  } catch (e) { out.listErr = String(e); }
+  const models = [props.getProperty('GEMINI_MODEL')].concat(AI_MODELS).filter((m, i, a) => m && a.indexOf(m) === i);
+  models.forEach(model => {
+    try {
+      const r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+        method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, muteHttpExceptions: true,
+        payload: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ตอบคำว่า ok' }] }] }),
+      });
+      out.tries.push({ model: model, code: r.getResponseCode(), msg: r.getContentText().slice(0, 300) });
+    } catch (e) { out.tries.push({ model: model, err: String(e) }); }
+  });
+  return out;
+}
+
+function aiFetch_(model, req, key) {
+  let r;
+  try {
+    r = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify(req),
+      headers: { 'x-goog-api-key': key }, muteHttpExceptions: true,
+    });
+  } catch (e) { aiHealthModel_(model, 0, String(e)); throw e; }
+  aiHealthModel_(model, r.getResponseCode(), r.getResponseCode() === 200 ? '' : r.getContentText());
+  return r;
+}
+
+/** ทดสอบความเร็ว/ความแม่นของรุ่นเดียว (อ่านอย่างเดียว ไม่บันทึก) */
+function aiBench_(id, model, think) {
+  AI_ERRS = [];
+  const t0 = Date.now();
+  const o = aiRead_(DriveApp.getFileById(id), { cats: moneyCatList_('out'), models: [model], think: think });
+  return { model: model, think: think, ms: Date.now() - t0, errs: AI_ERRS.slice(0, 3),
+    ai: o ? { kind: o.kind, date: o.date, amount: o.amount, vendor: o.vendor, vat: o.vat, cat: o.cat, memo: o.memo || '', items: (o.items || []).length } : null };
+}
+
+/** สร้างไฟล์ + อ่านเอกสารทั้งหมดก่อนเข้าล็อก (คืน [{file, mime, thumb, o}]) */
+function preRead_(p, folderFn, cats) {
+  const list = Array.isArray(p.files) && p.files.length ? p.files.slice(0, 10) : [{ data: p.data, mime: p.mime, thumb: p.thumb }];
+  const folder = folderFn();
+  return list.map(f => {
+    const mime = String(f.mime || 'application/octet-stream');
+    if (!/^(image\/|application\/pdf)/.test(mime)) throw new Error('รองรับเฉพาะรูปและ PDF');
+    const bytes = Utilities.base64Decode(String(f.data || ''));
+    if (bytes.length > 15 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 15MB');
+    const file = folder.createFile(Utilities.newBlob(bytes, mime, 'upload'));
+    let o = {};
+    try { o = readDoc_(file, { cats: cats }) || {}; } catch (e) { o = {}; }
+    return { file: file, mime: mime, thumb: f.thumb, o: o };
+  });
+}
+
+/** เรียก Gemini ให้ตอบเป็น JSON ตาม schema (ใช้รุ่น/การลองซ้ำแบบเดียวกับ aiRead_) */
+function aiJson_(bytes, mime, prompt, schema) {
+  const key = props.getProperty('GEMINI_API_KEY');
+  if (!key) throw new Error('ยังไม่ได้ใส่ GEMINI_API_KEY');
+  const parts = bytes ? [{ inline_data: { mime_type: mime, data: Utilities.base64Encode(bytes) } }, { text: prompt }] : [{ text: prompt }];
+  const body = {
+    contents: [{ role: 'user', parts: parts }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: schema },
+  };
+  const models = aiModels_();
+  const start = Date.now();
+  let last = '';
+  for (const model of models) {
+    if (Date.now() - start > 60000) break;
+    try {
+      const req = JSON.parse(JSON.stringify(body));
+      if (/^gemini-[3-9]/.test(model)) req.generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+      let r = aiFetch_(model, req, key);
+      if (r.getResponseCode() === 400 && /thinking/i.test(r.getContentText())) { delete req.generationConfig.thinkingConfig; r = aiFetch_(model, req, key); }
+      if ((r.getResponseCode() === 429 || r.getResponseCode() === 503) && Date.now() - start < 30000) { Utilities.sleep(2500); r = aiFetch_(model, req, key); }
+      if (r.getResponseCode() !== 200) { last += model + ' ' + r.getResponseCode() + ': ' + r.getContentText().replace(/\s+/g, ' ').slice(0, 160) + ' | '; continue; }
+      const res = JSON.parse(r.getContentText());
+      const cand = (res.candidates || [])[0] || {};
+      const raw = ((cand.content || {}).parts || []).map(p => p.thought ? '' : (p.text || '')).join('');
+      try { const out = JSON.parse(raw.replace(/^```(?:json)?|```$/g, '').trim()); aiHealthDone_(true); return out; }
+      catch (e) { last += model + ' อ่านคำตอบไม่ได้ (' + (cand.finishReason || '') + '): ' + raw.slice(0, 120) + ' | '; }
+    } catch (e) { last += model + ' ' + e + ' | '; }
+  }
+  aiHealthDone_(false);
+  throw new Error('AI อ่านไม่สำเร็จ ลองใหม่อีกครั้ง (' + last + ')');
+}
+
+/* ===================== 📇 การ์ดจากข้อความ/รูปใน LINE · ✨ สรุปบันทึกประชุม ===================== */
+
+/* ===================== 🎙 ข้อความเสียงใน LINE → รายจ่าย / รายรับ / ค้างกัน ===================== */
+/* AI ฟังเสียง (นอกล็อก) → แปลงเป็นคำสั่งรูปแบบเดียวกับที่พิมพ์ แล้วส่งต่อเข้า handleLine_ เหมือนพิมพ์เอง
+ * คำตอบขึ้นต้นด้วย "🎙 ได้ยินว่า …" (REPLY_PREFIX) ถ้าเดาผิด แตะ ↔ เปลี่ยนประเภทได้เหมือนข้อความปกติ */
+function lineVoice_(ev) {
+  const msg = ev.message;
+  if (Number(msg.duration || 0) > 120000) { reply_(ev.replyToken, '🎙 เสียงยาวเกิน 2 นาที ลองพูดสั้นๆ ทีละเรื่องนะครับ'); return; }
+  const res = UrlFetchApp.fetch('https://api-data.line.me/v2/bot/message/' + msg.id + '/content', {
+    headers: { Authorization: 'Bearer ' + props.getProperty('LINE_TOKEN') }, muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) throw new Error('ดาวน์โหลดเสียงจาก LINE ไม่ได้');
+  const blob = res.getBlob();
+  let mime = String(blob.getContentType() || 'audio/mp4');
+  if (/m4a|x-m4a|mp4/.test(mime)) mime = 'audio/mp4';
+  const j = voiceParse_(blob.getBytes(), mime, '');
+  const heard = String(j.text || '').trim(), cmd = String(j.cmd || '').replace(/\s+/g, ' ').trim();
+  if (!heard || !cmd) { reply_(ev.replyToken, '🎙 ไม่ได้ยินคำพูดชัดๆ ลองอัดใหม่ใกล้ไมค์อีกนิดครับ'); return; }
+  REPLY_PREFIX = '🎙 ได้ยินว่า "' + heard.slice(0, 200) + '"\n\n';
+  try {
+    handleLine_([{ type: 'message', replyToken: ev.replyToken, source: ev.source, message: { type: 'text', id: msg.id, text: cmd.slice(0, 500) } }]);
+  } finally { REPLY_PREFIX = ''; }
+}
+
+/** 🎙 ถอดเสียง + แปลงเป็นคำสั่งแบบพิมพ์ · page = หน้าที่กดไมค์ (tasks/money/inbox) ช่วยเดาประเภท */
+function voiceParse_(bytes, mime, page) {
+  const S = (type, extra) => Object.assign({ type: type }, extra || {});
+  return aiJson_(bytes, mime, [
+    'นี่คือข้อความเสียงภาษาไทย (อาจมีอังกฤษปน) ที่เจ้าของพูดสั่งแอปจดเงิน วันนี้คือ ' + todayStr_(),
+    '1) text = ถอดคำพูดตามที่ได้ยิน ไม่แต่งเพิ่ม ถ้าไม่ได้ยินคำพูดเลยให้เว้นว่าง',
+    '2) kind = expense (จ่ายเงิน) | income (ได้เงิน) | owe (ยืม/คืน/หารกับเพื่อน หรือถามว่าใครค้าง)',
+    '3) cmd = แปลงเป็นข้อความสั้นตามรูปแบบนี้เท่านั้น ใช้ตัวเลขอารบิก',
+    '   expense: "จ่าย 120 ข้าวมันไก่"   income: "รับ 25000 เงินเดือน"',
+    '   owe: "ต้นยืม 500" (เขายืมเรา) | "ยืมต้น 500" (เรายืมเขา) | "ต้นคืน 200" (เขาคืนเรา) | "คืนต้น 200" (เราคืนเขา) | "หาร ชาบู 1200 เอ็ม เจ" | "ใครค้าง"',
+  ].join('\n'), S('OBJECT', {
+    properties: { text: S('STRING'), kind: S('STRING', { enum: ['expense', 'income', 'owe'] }), cmd: S('STRING') },
+    required: ['text', 'kind', 'cmd'],
+  }));
+}
+function aiVoice_(body) {
+  const b64 = String(body.data || '');
+  if (!b64) throw new Error('ไม่มีเสียง');
+  if (b64.length > 8e6) throw new Error('เสียงยาวเกินไป');
+  const j = voiceParse_(Utilities.base64Decode(b64), String(body.mime || 'audio/wav'), String(body.page || ''));
+  return { text: String(j.text || '').trim(), kind: j.kind || '', cmd: String(j.cmd || '').replace(/\s+/g, ' ').trim() };
+}
