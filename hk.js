@@ -129,11 +129,11 @@ let cs = null;
 const HK_CATS = [
   ['food', '🍜', 'อาหาร', [['ชาบู/หมูกระทะ', 'items'], ['ร้านอาหาร', 'items'], ['เดลิเวอรี่', 'items'], ['กาแฟ/ขนม', 'items']]],
   ['mart', '🏪', 'เซเว่น', [['เซเว่น', 'items'], ['ซูเปอร์มาร์เก็ต', 'items']]],
-  ['sport', '🏸', 'กีฬา', [['ค่าสนาม', 'hours', 'ชม.'], ['ลูกแบด', 'hours', 'ลูก'], ['ค่าคอร์ท', 'hours', 'ชม.'], ['ฟุตซอล', 'hours', 'ชม.'], ['ค่าน้ำ/น้ำแข็ง', 'equal']]],
-  ['karaoke', '🎤', 'คาราโอเกะ', [['ค่าห้อง', 'hours', 'ชม.'], ['เครื่องดื่ม', 'equal'], ['อาหาร', 'items']]],
+  ['sport', '🏸', 'กีฬา', [['ค่าคอร์ท', 'hours', 'ชม.', 1], ['ลูกแบด', 'equal', 'ลูก', 1], ['ค่าสนาม', 'hours', 'ชม.', 1], ['ฟุตซอล', 'hours', 'ชม.', 1], ['ค่าน้ำ/น้ำแข็ง', 'equal']]],
+  ['karaoke', '🎤', 'คาราโอเกะ', [['ค่าห้อง', 'hours', 'ชม.', 1], ['เครื่องดื่ม', 'equal'], ['อาหาร', 'items']]],
   ['drink', '🍻', 'ปาร์ตี้', [['เบียร์/เหล้า', 'equal'], ['มิกเซอร์/น้ำแข็ง', 'equal'], ['ค่าเข้าร้าน', 'equal']]],
   ['ride', '🚕', 'เดินทาง', [['แท็กซี่/Grab', 'equal'], ['ค่าน้ำมัน', 'equal'], ['ทางด่วน', 'equal'], ['ค่าจอดรถ', 'equal']]],
-  ['trip', '🧳', 'ทริป', [['ค่าที่พัก', 'hours', 'คืน'], ['เช่ารถ', 'hours', 'วัน'], ['ค่าตั๋ว', 'equal'], ['ค่ากิจกรรม', 'equal']]],
+  ['trip', '🧳', 'ทริป', [['ค่าที่พัก', 'hours', 'คืน', 1], ['เช่ารถ', 'hours', 'วัน', 1], ['ค่าตั๋ว', 'equal'], ['ค่ากิจกรรม', 'equal']]],
   ['movie', '🎬', 'หนัง', [['ตั๋วหนัง', 'equal'], ['ป๊อปคอร์น', 'equal']]],
   ['home', '🏠', 'บ้าน', [['ค่าเน็ต', 'equal'], ['ค่าไฟ', 'equal'], ['ค่าน้ำ', 'equal'], ['Netflix/YouTube', 'equal'], ['ค่าส่วนกลาง', 'equal']]],
   ['gift', '🎁', 'ของขวัญ', [['ของขวัญวันเกิด', 'equal'], ['เค้ก', 'equal'], ['ซองงาน', 'equal']]],
@@ -144,7 +144,7 @@ function openCreate(bill, root) {
   const mem = (home.group && home.group.members) || [];
   const me = { key: 'me', uid: '', name: (home.me.disp || 'ฉัน'), me: true, on: true, units: 2, custom: '' };
   if (!bill) {
-    cs = { edit: null, title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', selfUnits: true, cat: '', rcpt: '', rcptImg: '', hadRcpt: false, items: [], people: [me].concat(mem.map(m => ({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }))) };
+    cs = { edit: null, title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', selfUnits: true, cat: '', calc: false, rate: '', qty: '', parts: null, cur: 0, billTitle: '', rcpt: '', rcptImg: '', hadRcpt: false, items: [], people: [me].concat(mem.map(m => ({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }))) };
   } else {
     const rows = bill.rows || [];
     cs = { edit: bill.id, title: bill.title, total: plain(bill.totalS), touched: true, mode: bill.mode, unit: bill.unit || 'ชม.', selfUnits: !!bill.selfUnits, cat: bill.cat || '', rcpt: '', rcptImg: '', hadRcpt: !!bill.rcpt,
@@ -153,6 +153,18 @@ function openCreate(bill, root) {
     cs.people.push(me);
     rows.forEach(r => cs.people.push({ key: r.k, uid: r.uid, name: r.name, on: true, units: r.units || 2, custom: plain(r.amtS), out: r.out, byUid: r.byMe ? 'me' : r.byUid || '' }));
     mem.forEach(m => { if (!cs.people.some(p => p.uid === m.uid)) cs.people.push({ key: m.uid, uid: m.uid, name: m.name, on: false, units: 2, custom: '' }); });
+    Object.assign(cs, { calc: !!bill.calc, rate: bill.calc ? plain(bill.calc.rateS) : '', qty: bill.calc && bill.calc.qty ? String(bill.calc.qty) : '', parts: null, cur: 0, billTitle: '' });
+    if (bill.calc && bill.calc.unit) cs.unit = bill.calc.unit;
+    if (bill.parts && bill.parts.length > 1) {   // 🧩 บิลหลายรายการ: คืนแต่ละรายการให้แก้ต่อ
+      cs.billTitle = bill.title;
+      cs.parts = bill.parts.map(pt => {
+        const pp = {};
+        cs.people.forEach(p => { const v = (pt.sh || {})[p.key] || 0; pp[p.key] = { on: v > 0, units: (pt.u || {})[p.key] || 2, custom: v ? plain(v) : '' }; });
+        return { title: pt.name, total: plain(pt.totalS), touched: true, mode: pt.mode, unit: pt.unit || 'ชม.', cat: pt.cat || '', calc: !!pt.rateS, rate: pt.rateS ? plain(pt.rateS) : '', qty: pt.qty ? String(pt.qty) : '',
+          items: (pt.items || []).map(it => ({ name: it.name, price: plain(it.priceS), who: it.who.slice() })), pp: pp };
+      });
+      partLoad(cs.parts[0]);
+    }
   }
   show({ name: 'create' }, root);
 }
@@ -171,8 +183,15 @@ function spread(R, list, payerKey, w, out) {
     for (let i = 0; extra > 0; i = (i + 1) % list.length) { out[list[i].key]++; extra--; }
   }
 }
+/** 🧮 ราคาต่อหน่วย × จำนวน (ตามชั่วโมง: ไม่ใส่จำนวน = ใช้ชั่วโมงของคนที่อยู่นานสุด) */
+function calcQty() {
+  const q = Number(String(cs.qty).replace(/[^\d.]/g, ''));
+  if (q > 0) return q;
+  return cs.mode === 'hours' ? Math.max(0, ...cs.people.filter(p => p.on).map(p => p.units)) : 0;
+}
 function compute() {
   const on = cs.people.filter(p => p.on), amt = {}, sub = {};
+  if (cs.calc) { const t = Math.round(toS(cs.rate) * calcQty()); cs.total = t ? plain(t) : ''; cs.touched = true; }
   let T = toS(cs.total);
   if (cs.mode === 'items') {
     const keys = on.map(p => p.key);
@@ -209,40 +228,107 @@ function discTarget(discName, list) {   // เหมือน owe.js: ชื่�
 function itemsTotal() { return cs.items.reduce((s, it) => s + toS(it.price), 0); }
 function byName(uid) { if (uid === 'me') return 'ฉัน'; const p = cs.people.find(x => x.uid === uid); return p ? p.name : ''; }
 
+/* ---------- 🧩 หลายรายการในบิลเดียว: รายการที่เปิดอยู่ใช้ช่องเดิมของ cs ส่วนรายการอื่นเก็บเป็นภาพไว้ใน cs.parts ---------- */
+const PART_F = ['title', 'total', 'touched', 'mode', 'unit', 'cat', 'calc', 'rate', 'qty'];
+function partSnap() {
+  const o = { items: cs.items.map(it => ({ name: it.name, price: it.price, who: it.who.slice() })), pp: {} };
+  PART_F.forEach(f => { o[f] = cs[f]; });
+  cs.people.forEach(p => { o.pp[p.key] = { on: p.on, units: p.units, custom: p.custom }; });
+  return o;
+}
+function partLoad(o) {
+  PART_F.forEach(f => { cs[f] = o[f]; });
+  cs.items = o.items.map(it => ({ name: it.name, price: it.price, who: it.who.slice() }));
+  cs.people.forEach(p => { const x = o.pp[p.key]; if (x) Object.assign(p, x); else Object.assign(p, { on: false, units: 2, custom: '' }); });
+}
+function partGo(i) { cs.parts[cs.cur] = partSnap(); cs.cur = i; partLoad(cs.parts[i]); drawCreate(); window.scrollTo(0, 0); }
+function partAdd() {
+  if (!cs.parts) { cs.parts = [partSnap()]; cs.cur = 0; }
+  cs.parts[cs.cur] = partSnap();
+  const n = { title: '', total: '', touched: false, mode: 'equal', unit: 'ชม.', cat: cs.cat, calc: false, rate: '', qty: '', items: [], pp: {} };
+  cs.people.forEach(p => { n.pp[p.key] = { on: p.on, units: 2, custom: '' }; });   // คนเดิมทุกคน เอาออกได้
+  cs.parts.push(n); cs.cur = cs.parts.length - 1; partLoad(n); cs.selfUnits = false;
+  drawCreate(); window.scrollTo(0, 0); setTimeout(() => { const t = $('#cTitle'); if (t) t.focus(); }, 50);
+}
+function partDel() {
+  if (!cs.parts || !confirm('ลบรายการ "' + (cs.title || 'รายการ ' + (cs.cur + 1)) + '" ออกจากบิล?')) return;
+  cs.parts.splice(cs.cur, 1); cs.cur = Math.max(0, cs.cur - 1); partLoad(cs.parts[cs.cur]);
+  if (cs.parts.length === 1) cs.parts = null;
+  drawCreate();
+}
+/** คิดทุกรายการ → ยอดรวมของแต่ละคนทั้งบิล */
+function computeAll() {
+  if (!cs.parts) { const r = compute(); return { list: [r], T: r.T, amt: r.amt, bad: r.T && r.diff === 0 ? -1 : 0 }; }
+  cs.parts[cs.cur] = partSnap();
+  const list = cs.parts.map((pt, i) => { partLoad(pt); const r = compute(); cs.parts[i] = partSnap(); return r; });
+  partLoad(cs.parts[cs.cur]);
+  const amt = {};
+  list.forEach(r => Object.keys(r.amt).forEach(k => { amt[k] = (amt[k] || 0) + (r.amt[k] || 0); }));
+  return { list: list, T: list.reduce((a, r) => a + r.T, 0), amt: amt, bad: list.findIndex(r => !(r.T && r.diff === 0)) };
+}
+const autoTitle = () => cs.parts.map((pt, i) => pt.title.trim() || 'รายการ ' + (i + 1)).join(' + ').slice(0, 60);
+function partsBar() {
+  if (!cs.parts) return '';
+  const A = computeAll();
+  return `<div class="sec" style="padding:12px 14px 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="sec-h" style="padding:0">รายการในบิลนี้ ${cs.parts.length} รายการ · แตะเพื่อสลับ</div>
+    <div class="chips" style="padding:0">${cs.parts.map((pt, i) => `<button type="button" class="chip" data-part="${i}" aria-pressed="${i === cs.cur}">${i + 1}. ${esc(pt.title || 'รายการ')} ${A.list[i].T ? baht(A.list[i].T) : ''}${A.list[i].T && A.list[i].diff === 0 ? '' : ' ⚠️'}</button>`).join('')}<button type="button" class="chip" id="partAdd2">+ เพิ่มรายการ</button></div>
+    <label class="field"><span class="lbl">ชื่อบิล (ขึ้นในการ์ดในกลุ่ม)</span><input id="cBill" type="text" maxlength="60" placeholder="${esc(autoTitle())}" value="${esc(cs.billTitle)}"></label>
+  </div>`;
+}
 function drawCreate() {
+  const again = !!$('#cTitle'), keepX = ($('#catRow') || {}).scrollLeft || 0, keepY = window.scrollY;   // แตะหมวดแล้วไม่เด้งกลับหน้าสุด
   $('#ttl').textContent = cs.edit ? 'แก้บิล' : 'สร้างบิล';
   const mem = cs.people.filter(p => !p.me && !p.out);
   $('#app').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between"><h1>${cs.edit ? 'แก้บิล' : 'สร้างบิล'}</h1><span class="pill ink">${cs.pool ? '🏦 จ่ายจากกอง' : 'โหมดคนจ่ายก่อน'}</span></div>
     ${cs.pool ? `<div class="sec" style="padding:10px 14px"><div class="nm">🏦 จ่ายจากกองกลาง "${esc(cs.poolName)}"</div><div class="lbl">${cs.poolEq ? 'กองนี้หารเท่ากันทั้งกอง: บิลนี้หารเท่ากันทุกคนในกอง ' + cs.poolN + ' คน' : 'ไม่มีใครต้องโอน ระบบจดว่าแต่ละคนใช้เงินกองเท่าไหร่ ไว้คิดตอนปิดกอง'} · ส่งการ์ดแจ้งในกลุ่มให้เอง</div></div>` : ''}
-    <div class="sec" style="padding:12px 14px;display:flex;gap:12px">
-      <label class="field" style="flex:1.4"><span class="lbl">ค่าอะไร</span><input id="cTitle" type="text" maxlength="60" placeholder="เช่น ชาบู ค่าคอร์ต" value="${esc(cs.title)}"></label>
-      <label class="field" style="flex:1"><span class="lbl">ยอดรวม (บาท)</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}"></label>
-    </div>
+    ${partsBar()}
     ${catBlock()}
+    <div class="sec" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      ${cs.parts ? `<div style="display:flex;justify-content:space-between;align-items:center"><span class="sec-h" style="padding:0">รายการที่ ${cs.cur + 1}</span><button type="button" class="lnk" id="partDel" style="padding:0;color:var(--bad)">ลบรายการนี้</button></div>` : ''}
+      <div style="display:flex;gap:12px">
+        <label class="field" style="flex:1.4"><span class="lbl">ค่าอะไร</span><input id="cTitle" type="text" maxlength="60" placeholder="เช่น ชาบู ค่าคอร์ท" value="${esc(cs.title)}"></label>
+        <label class="field" style="flex:1"><span class="lbl">${cs.calc ? 'ยอด (คิดให้)' : 'ยอดรวม (บาท)'}</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}" ${cs.calc ? 'readonly' : ''}></label>
+      </div>
+      ${cs.calc ? `<div class="calc" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <label class="field" style="flex:1.2;min-width:96px"><span class="lbl">ราคาต่อ<input id="cUnit" type="text" maxlength="8" value="${esc(cs.unit)}" aria-label="หน่วย" style="width:3.6em;border:0;border-bottom:1px dashed var(--line);background:transparent;font:inherit;color:inherit;padding:0 2px"></span><input id="cRate" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.rate)}"></label>
+        <span style="padding-bottom:8px" aria-hidden="true">×</span>
+        <label class="field" style="flex:1;min-width:80px"><span class="lbl">ใช้ไปกี่${esc(cs.unit)}</span><input id="cQty" class="num" type="text" inputmode="decimal" placeholder="${cs.mode === 'hours' ? String(calcQty() || 0) : '0'}" value="${esc(cs.qty)}"></label>
+        <button type="button" class="lnk" id="calcOff" style="padding:0 0 8px">ใส่ยอดเอง</button>
+      </div>${cs.mode === 'hours' ? '<div class="lbl">ไม่ใส่จำนวน = ใช้เวลาของคนที่อยู่นานสุด แล้วหารตามชั่วโมงของแต่ละคน</div>' : ''}` : `<button type="button" class="lnk" id="calcOn" style="align-self:flex-start;padding:0">🧮 คิดจากราคาต่อหน่วย (เช่น ลูกละ 80 × 4 ลูก)</button>`}
+    </div>
     ${rcptBlock()}
     ${cs.poolEq ? `<div class="sec list" id="people"><div class="item"><div class="mid"><div class="nm">หารเท่ากัน ${cs.poolN} คน</div><div class="lbl">${esc(cs.people.filter(p => p.on).map(p => p.me ? 'ฉัน' : p.name).join(', '))}</div></div><div class="amt" id="eqEach"></div></div></div>` : `<div class="tabs" role="group" aria-label="วิธีหาร">${MODES.map(([k, l]) => `<button type="button" class="tab" data-mode="${k}" aria-pressed="${cs.mode === k}">${l}</button>`).join('')}</div>
     ${cs.mode === 'items' && cs.touched && itemsTotal() && itemsTotal() !== toS(cs.total) ? `<div class="lbl" style="margin:-4px 4px 0">เมนูรวม ${baht(itemsTotal())} ไม่เท่ายอดบิล ส่วนต่าง (ค่าบริการ/ส่วนลด) แบ่งตามสัดส่วนที่แต่ละคนกิน</div>` : ''}
     <div class="lbl" style="margin:-4px 4px 0">${{ equal: 'ทุกคนที่ติ๊กจ่ายเท่ากัน เศษอยู่กับคนจ่ายก่อน', hours: 'กด − + ปรับจำนวนชั่วโมงของแต่ละคน มาน้อยจ่ายน้อย', items: 'ใส่เมนู แล้วแตะชื่อคนที่กินเมนูนั้น เมนูที่กินด้วยกันหารเท่ากัน', custom: 'รู้ยอดของแต่ละคนอยู่แล้ว (เช่น ต่างคนต่างซื้อ) ใส่ยอดของเพื่อนแต่ละคน ที่เหลือเป็นส่วนของคุณ' }[cs.mode]}</div>
-    ${cs.mode === 'hours' ? `<label class="lbl" style="display:flex;gap:8px;align-items:center;margin:0 4px"><input type="checkbox" id="selfU" ${cs.selfUnits ? 'checked' : ''} style="width:18px;height:18px"> ให้เพื่อนกดแก้ชั่วโมงของตัวเองได้ (จนกว่าจะมีคนจ่าย)</label>` : ''}
+    ${cs.mode === 'hours' && !cs.parts ? `<label class="lbl" style="display:flex;gap:8px;align-items:center;margin:0 4px"><input type="checkbox" id="selfU" ${cs.selfUnits ? 'checked' : ''} style="width:18px;height:18px"> ให้เพื่อนกดแก้ชั่วโมงของตัวเองได้ (จนกว่าจะมีคนจ่าย)</label>` : ''}
     ${cs.mode === 'items' ? itemsBlock() : ''}
     <div class="sec list" id="people">
       ${cs.people.map(personRow).join('')}
       <button type="button" class="row-btn item" id="addOut"><span class="lnk" style="padding:0">+ เพิ่มคนนอกกลุ่ม</span></button>
     </div>
     ${mem.length ? '<div class="lbl" style="padding:0 4px">ไม่เห็นชื่อใคร ให้คนนั้นแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก หรือเพิ่มเป็นคนนอกกลุ่มไปก่อน</div>' : '<div class="lbl" style="padding:0 4px">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก (พิมพ์ แมวกวัก ในกลุ่มเพื่อเรียกการ์ด) แล้วกลับมาที่หน้านี้ใหม่</div>'}`}
+    ${cs.poolEq ? '' : cs.parts ? '<div class="sec list" id="allSum"></div>' : `<button type="button" class="row-btn item" id="partAdd" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;text-align:left;font:inherit;color:inherit"><span class="mid" style="display:flex;flex-direction:column;gap:2px"><span class="nm">+ เพิ่มรายการในบิลนี้</span><span class="lbl">เช่น ค่าคอร์ท + ค่าลูก + ข้าว + ค่ารถ แต่ละรายการเลือกหมวดและวิธีหารเองได้</span></span></button>`}
     ${cs.pool ? '' : payBlock()}`;
   bindCreate();
+  if (again) { const cr = $('#catRow'); if (cr) cr.scrollLeft = keepX; window.scrollTo(0, keepY); }
   const su = $('#selfU'); if (su) su.onchange = () => { cs.selfUnits = su.checked; };
   foot(`<div class="sum"><span class="lbl" id="fl"></span><span id="fr" style="font-weight:600"></span></div><button class="btn ink" type="button" id="send">${cs.pool ? 'บันทึกบิลจากกอง' : cs.edit ? 'บันทึกและส่งบิลเข้ากลุ่ม' : 'ส่งบิลเข้ากลุ่ม'}</button>`);
+  const cr = $('#catRow'); if (cr && !again) { const on = cr.querySelector('[aria-pressed="true"]'); if (on) cr.scrollLeft = Math.max(0, on.offsetLeft - 14); }
   $('#send').onclick = submitCreate;
   refresh();
 }
+function histChip(x, i, row) { const c = catOf(x.cat); return `<button type="button" class="chip" data-hist="${row}:${i}" style="flex:none" aria-pressed="${cs.title === x.name}">${c ? c[1] + ' ' : ''}${esc(x.name)}${x.rateS ? ' · ' + baht(x.rateS) + '/' + esc(x.unit || 'หน่วย') : ''}</button>`; }
 function catBlock() {
-  const c = catOf(cs.cat);
-  return `<div class="sec" style="padding:12px 0 2px"><div class="sec-h" style="padding:0 14px 8px">หมวด</div>
-    <div class="chips" style="flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none">${HK_CATS.map(x => `<button type="button" class="chip" data-cat="${x[0]}" aria-pressed="${cs.cat === x[0]}" style="flex:none">${x[1]} ${esc(x[2])}</button>`).join('')}</div>
-    ${c ? `<div class="chips">${c[3].map((x, i) => `<button type="button" class="chip" data-subcat="${i}" aria-pressed="${cs.title === x[0]}">${esc(x[0])}${x[1] === 'hours' ? ' · ต่อ' + esc(x[2]) : ''}</button>`).join('')}</div>` : ''}</div>`;
+  const c = catOf(cs.cat), H = home.hist || { top: [], recent: [] };
+  const mine = c ? (H.top.concat(H.recent)).filter(x => x.cat === cs.cat && !c[3].some(d => d[0] === x.name)) : [];
+  const row = (label, list, key) => list.length ? `<div class="lbl" style="padding:0 14px">${label}</div><div class="chips" style="flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none">${list.map((x, i) => histChip(x, i, key)).join('')}</div>` : '';
+  return `<div class="sec" style="padding:12px 0 2px;display:flex;flex-direction:column;gap:6px">
+    ${row('ใช้บ่อยในกลุ่มนี้', H.top, 'top')}${row('ล่าสุด', H.recent, 'recent')}
+    <div class="lbl" style="padding:0 14px">หมวด</div>
+    <div class="chips" id="catRow" style="flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none">${HK_CATS.map(x => `<button type="button" class="chip" data-cat="${x[0]}" aria-pressed="${cs.cat === x[0]}" style="flex:none">${x[1]} ${esc(x[2])}</button>`).join('')}</div>
+    ${c ? `<div class="chips">${c[3].map((x, i) => `<button type="button" class="chip" data-subcat="${i}" aria-pressed="${cs.title === x[0]}">${esc(x[0])}${x[3] ? ' · ราคาต่อ' + esc(x[2]) : x[1] === 'hours' ? ' · ต่อ' + esc(x[2]) : ''}</button>`).join('')}${mine.map(x => `<button type="button" class="chip" data-hist="cat:${esc(x.name)}" aria-pressed="${cs.title === x.name}">${esc(x.name)}</button>`).join('')}<button type="button" class="chip" id="ownName">+ ตั้งชื่อเอง</button></div>` : ''}</div>`;
 }
 function rcptBlock() {
   const has = cs.rcptImg || (cs.hadRcpt && !cs.rcpt);
@@ -289,7 +375,27 @@ function payBlock() {
 function bindCreate() {
   const A = $('#app');
   $('#cTitle').oninput = e => { cs.title = e.target.value; };
-  $('#cTotal').oninput = e => { cs.total = e.target.value; cs.touched = true; refresh(); };
+  $('#cTotal').oninput = e => { if (cs.calc) return; cs.total = e.target.value; cs.touched = true; refresh(); };
+  const on = (id, f) => { const el = $(id); if (el) el.onclick = f; };
+  on('#calcOn', () => { cs.calc = true; if (!cs.rate && toS(cs.total)) cs.rate = cs.total; drawCreate(); const r = $('#cRate'); if (r) r.focus(); });
+  on('#calcOff', () => { cs.calc = false; drawCreate(); });
+  const ci = (id, f) => { const el = $(id); if (el) el.oninput = e => { cs[f] = e.target.value; refresh(); }; };
+  ci('#cRate', 'rate'); ci('#cQty', 'qty');
+  const cu = $('#cUnit'); if (cu) cu.oninput = e => { cs.unit = e.target.value.trim() || 'หน่วย'; };
+  on('#partAdd', partAdd); on('#partAdd2', partAdd); on('#partDel', partDel);
+  A.querySelectorAll('[data-part]').forEach(b => b.onclick = () => partGo(+b.dataset.part));
+  const cb = $('#cBill'); if (cb) cb.oninput = e => { cs.billTitle = e.target.value; };
+  on('#ownName', () => { cs.title = ''; const t = $('#cTitle'); t.value = ''; t.focus(); t.placeholder = 'ตั้งชื่อเอง เช่น ค่าเช่าไม้'; });
+  A.querySelectorAll('[data-hist]').forEach(b => b.onclick = () => {
+    const H = home.hist || { top: [], recent: [] }, [row, i] = b.dataset.hist.split(/:(.*)/s);
+    const x = row === 'cat' ? H.top.concat(H.recent).find(y => y.name === i) : H[row][+i];
+    if (!x) return;
+    cs.title = x.name; if (x.cat) cs.cat = x.cat;
+    if (!cs.poolEq) { cs.mode = x.mode || 'equal'; if (x.unit) cs.unit = x.unit; }
+    if (x.rateS) { cs.calc = true; cs.rate = plain(x.rateS); cs.qty = ''; }
+    if (cs.mode === 'items' && !cs.items.length) { cs.items.push({ name: '', price: '', who: [] }); cs.touched = !!toS(cs.total); }
+    drawCreate();
+  });
   A.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { cs.mode = b.dataset.mode; if (cs.mode === 'items' && !cs.items.length) { cs.items.push({ name: '', price: '', who: [] }); cs.touched = !!toS(cs.total); } drawCreate(); });
   A.querySelectorAll('[data-on]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.on]; p.on = !p.on; if (!p.on) cs.items.forEach(it => { it.who = it.who.filter(k => k !== p.key); }); drawCreate(); });
   A.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => { const p = cs.people[+b.dataset.inc]; p.units = Math.min(24, p.units + 0.5); drawCreate(); });
@@ -300,7 +406,9 @@ function bindCreate() {
   A.querySelectorAll('[data-subcat]').forEach(b => b.onclick = () => {
     const x = catOf(cs.cat)[3][+b.dataset.subcat];
     cs.title = x[0];
-    if (x[1] === 'hours') { cs.mode = 'hours'; cs.unit = x[2]; }
+    if (x[2]) cs.unit = x[2];
+    if (x[3]) { cs.calc = true; cs.qty = ''; }
+    if (x[1] === 'hours') cs.mode = 'hours';
     else if (x[1] === 'items') { cs.mode = 'items'; if (!cs.items.length) { cs.items.push({ name: '', price: '', who: [] }); cs.touched = !!toS(cs.total); } }
     else cs.mode = 'equal';
     if (cs.poolEq) cs.mode = 'equal';   // กองหารเท่ากันทั้งกอง: เลือกหมวดย่อยได้แค่ชื่อ
@@ -320,7 +428,8 @@ function bindCreate() {
   }
 }
 function refresh() {
-  const r = compute();
+  const all = computeAll(), r = cs.parts ? all.list[cs.cur] : all.list[0];
+  if (cs.calc) { const t = $('#cTotal'); if (t) t.value = cs.total; }
   cs.people.forEach(p => { const el = $(`[data-amt="${CSS.escape(p.key)}"]`); if (el) el.textContent = p.on ? baht(r.amt[p.key] || 0) : '—'; });
   if (cs.mode === 'items' && !cs.touched) { const t = $('#cTotal'); if (t && document.activeElement !== t) t.value = cs.total; }
   // คนที่จ่ายแทนคนนอกกลุ่ม: บอกยอดที่ต้องโอนรวม
@@ -330,8 +439,16 @@ function refresh() {
     const el = $(`[data-sub="${i}"]`);
     if (el) el.textContent = prox.length ? 'โอนรวม ' + baht((r.amt[p.key] || 0) + prox.reduce((s, o) => s + (r.amt[o.key] || 0), 0)) + ' (รวมของ' + prox.map(o => o.name).join(', ') + ')' : '';
   });
-  const others = cs.people.filter(p => p.on && !p.me && p.byUid !== 'me');
+  const others = cs.people.filter(p => !p.me && p.byUid !== 'me' && (cs.parts ? (all.amt[p.key] || 0) > 0 : p.on));
   const fl = $('#fl'), fr = $('#fr');
+  const as = $('#allSum');
+  if (as) as.innerHTML = `<div class="sec-h">รวมทั้งบิล ${baht(all.T)}</div>` + cs.people.filter(p => (all.amt[p.key] || 0) > 0).map(p => `<div class="item"><div class="mid"><div class="nm">${esc(p.me ? 'ฉัน' : p.name)}</div><div class="lbl">${esc(cs.parts.map((pt, i) => (all.list[i].amt[p.key] || 0) ? (pt.title || 'รายการ ' + (i + 1)) + ' ' + baht(all.list[i].amt[p.key]) : '').filter(Boolean).join(' · '))}</div></div><div class="amt">${baht(all.amt[p.key])}</div></div>`).join('');
+  if (cs.parts) {
+    if (fl) fl.textContent = others.length + ' คน' + (cs.pool ? 'ใช้ร่วมกัน' : 'ต้องจ่ายให้คุณ · รวม ' + baht(others.reduce((a, p) => a + (all.amt[p.key] || 0), 0)));
+    if (fr) { const ok = all.bad < 0; fr.textContent = ok ? 'ครบ ' + cs.parts.length + ' รายการ ' + baht(all.T) : 'รายการที่ ' + (all.bad + 1) + ' ยังไม่ครบ'; fr.style.color = ok ? 'var(--ok)' : 'var(--bad)'; }
+    const s2 = $('#send'); if (s2) s2.disabled = !(all.bad < 0 && (cs.pool || others.some(p => (all.amt[p.key] || 0) > 0)));
+    return r;
+  }
   const ee = $('#eqEach'); if (ee) ee.textContent = r.T ? 'คนละ ' + baht(Math.floor(r.T / Math.max(1, cs.poolN))) : '';
   if (fl) fl.textContent = cs.pool ? 'จ่ายจากกอง · ' + (others.length + 1) + ' คนใช้ร่วมกัน' : others.length + ' คนต้องจ่ายให้คุณ · รวม ' + baht(others.reduce((s, p) => s + (r.amt[p.key] || 0), 0));
   if (fr) { fr.textContent = !r.T ? 'ใส่ยอดรวม' : r.diff === 0 ? 'ยอดครบ ' + baht(r.T) : r.diff > 0 ? 'ยังขาด ' + baht(r.diff) : 'เกิน ' + baht(-r.diff); fr.style.color = r.T && r.diff === 0 ? 'var(--ok)' : 'var(--bad)'; }
@@ -414,6 +531,7 @@ async function readReceipt(b) {
     if (cs.items.length) {   // ยอดบิล = เมนู − ส่วนลดท้ายบิล (AI มักเอา "ยอดรวม" ก่อนลดมา)
       cs.total = plain(itemsS - toS(billDisc) - toS(r.discount || 0)); cs.touched = !!(billDisc || r.discount);
     } else if (r.amount) { cs.total = String(r.amount); cs.touched = true; }
+    if (r.amount || itemsS) cs.calc = false;   // ยอดจากใบเสร็จชนะการคิดราคาต่อหน่วย
     if (!cs.title && r.vendor) cs.title = r.vendor;
     if (r.check && !r.check.ok && cs.items.length) toast('⚠️ เมนูที่อ่านได้รวมแล้วไม่ตรงยอดใบเสร็จ (ต่าง ' + baht(toS(Math.abs(r.check.diff))) + ') เช็กเมนูกับใบเสร็จอีกครั้ง');
     else toast(cs.items.length ? 'อ่านได้ ' + cs.items.length + ' รายการ' + (discTotal ? ' หักส่วนลด ' + baht(toS(discTotal)) + ' แล้ว' : '') + ' แตะชื่อคนที่กินแต่ละเมนู' : 'อ่านได้แค่ยอดรวม');
@@ -423,14 +541,35 @@ async function readReceipt(b) {
 
 async function submitCreate() {
   const r = refresh(), btn = $('#send');
-  if (!cs.title.trim()) { $('#cTitle').focus(); toast('ใส่ชื่อบิลก่อน เช่น ชาบู'); return; }
+  if (!cs.parts && !cs.title.trim()) { $('#cTitle').focus(); toast('ใส่ชื่อบิลก่อน เช่น ชาบู'); return; }
   const me = cs.people.find(p => p.me);
   const itemsFor = k => cs.mode === 'items' ? cs.items.filter(it => it.who.indexOf(k) > -1).map(it => it.name || 'เมนู') : [];
+  if (cs.parts) {   // 🧩 หลายรายการ: ยอดของแต่ละคน = ผลรวมทุกรายการ
+    const all = computeAll();
+    if (all.bad > -1) { partGo(all.bad); toast('รายการที่ ' + (all.bad + 1) + ' ยอดยังไม่ครบ'); return; }
+    const big = cs.parts.map((pt, i) => [pt, all.list[i].T]).sort((x, y) => y[1] - x[1])[0][0];
+    const payload = { b: cs.edit || '', pool: cs.pool || '', title: (cs.billTitle.trim() || autoTitle()), totalS: all.T, mode: 'custom', unit: '', selfUnits: false, cat: big.cat || '', rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt,
+      payerIn: (all.amt.me || 0) > 0, payerShareS: all.amt.me || 0, payerUnits: 0, payerItems: [], items: [],
+      members: cs.people.filter(p => !p.me && (all.amt[p.key] || 0) > 0).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: all.amt[p.key], units: 0, items: [] })),
+      parts: cs.parts.map((pt, i) => {
+        const sh = {}, u = {};
+        Object.keys(all.list[i].amt).forEach(k => { if (all.list[i].amt[k]) sh[k] = all.list[i].amt[k]; });
+        if (pt.mode === 'hours') Object.keys(pt.pp).forEach(k => { if (pt.pp[k].on) u[k] = pt.pp[k].units; });
+        const q = Number(String(pt.qty).replace(/[^\d.]/g, '')) || (pt.mode === 'hours' ? Math.max(0, ...Object.values(pt.pp).filter(x => x.on).map(x => x.units)) : 0);
+        return { name: pt.title.trim() || 'รายการ ' + (i + 1), cat: pt.cat, mode: pt.mode, unit: pt.unit, rateS: pt.calc ? toS(pt.rate) : 0, qty: pt.calc ? q : 0, totalS: all.list[i].T, sh: sh, u: u,
+          items: pt.mode === 'items' ? pt.items.map(it => ({ name: it.name || 'เมนู', priceS: toS(it.price), who: it.who })) : [] };
+      }) };
+    return sendCreate(payload, $('#send'));
+  }
   const payload = {
+    rateS: cs.calc ? toS(cs.rate) : 0, qty: cs.calc ? calcQty() : 0, calcUnit: cs.unit,
     b: cs.edit || '', pool: cs.pool || '', title: cs.title.trim(), totalS: r.T, mode: cs.mode, unit: cs.unit, selfUnits: cs.mode === 'hours' && cs.selfUnits, cat: cs.cat, rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt, payerIn: me.on, payerShareS: me.on ? r.amt.me || 0 : 0, payerUnits: me.units, payerItems: itemsFor('me'),
     members: cs.people.filter(p => p.on && !p.me).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: r.amt[p.key] || 0, units: cs.mode === 'hours' ? p.units : 0, items: itemsFor(p.key) })),
     items: cs.mode === 'items' ? cs.items.map(it => ({ name: it.name || 'เมนู', priceS: toS(it.price), who: it.who })) : [],
   };
+  return sendCreate(payload, btn);
+}
+async function sendCreate(payload, btn) {
   busy(btn, true);
   try {
     const d = await call(cs.edit ? 'hk_edit' : 'hk_create', payload);
@@ -637,6 +776,13 @@ function groupsOf(bill) {   // รวมแถวตามคนที่ต้�
   });
   return Object.values(g).map(x => Object.assign(x, { st: x.rows.every(r => r.st === 'ok') ? 'ok' : x.rows.some(r => r.st === 'wait') ? (x.rows.some(r => r.st === 'told') ? 'told' : 'wait') : 'told', slip: x.rows.some(r => r.slip), extra: x.rows.filter(r => r.by || r.byMe).map(r => r.name) }));
 }
+/** 🧩 รายการในบิล + 🧮 ราคาต่อหน่วย (คนจ่ายก่อนเห็นยอดรายการ · เพื่อนเห็นส่วนของตัวเองในแต่ละรายการ) */
+function calcTxt(x) { return x && x.rateS ? esc(x.unit || 'หน่วย') + 'ละ ' + baht(x.rateS) + (x.qty ? ' × ' + x.qty + ' ' + esc(x.unit || '') : '') : ''; }
+function partsView(b) {
+  if (b.parts && b.parts.length) return `<div class="sec list"><div class="sec-h">รายการในบิลนี้${b.isPayer ? '' : ' (ส่วนของฉัน)'}</div>${b.parts.map(pt => { const c = catOf(pt.cat); const ct = calcTxt(pt);
+    return `<div class="item"><span class="pl-ic" aria-hidden="true">${c ? c[1] : '🧾'}</span><div class="mid"><div class="nm">${esc(pt.name)}</div><div class="lbl">${[ct, !b.isPayer && pt.units ? pt.units + ' ' + esc(pt.unit) : ''].filter(Boolean).join(' · ') || (c ? esc(c[2]) : '')}</div></div><div class="amt">${baht(b.isPayer ? pt.totalS : pt.mineS)}</div></div>`; }).join('')}</div>`;
+  return b.calc && b.calc.rateS ? `<div class="lbl">🧮 ${calcTxt(Object.assign({}, b.calc, { unit: b.calc.unit || b.unit }))}</div>` : '';
+}
 function drawTrack() {
   const b = view.bill;
   $('#ttl').textContent = b.title;
@@ -650,6 +796,7 @@ function drawTrack() {
   </div>`;
   $('#app').innerHTML = `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(b.title)} ${baht(b.totalS)}</h1><div class="sub">${esc([b.group, thDate(b.date)].filter(Boolean).join(' · '))} · คุณจ่ายก่อน</div></div><span class="pill ink">คนจ่ายก่อน</span></div>
+    ${partsView(b)}
     ${b.rcpt ? '<button type="button" class="lnk" id="seeRc" style="align-self:flex-start;padding:0">🧾 ดูรูปใบเสร็จ</button>' : ''}
     ${view.unsent ? `<div class="err">ยังไม่ได้ส่งการ์ดบิลเข้ากลุ่ม <button type="button" class="lnk" id="resend" style="padding:0">ส่งเข้ากลุ่ม</button></div>` : ''}
     <div class="sec" style="padding:14px"><div style="display:flex;justify-content:space-between;font-size:13px"><span>ได้คืนแล้ว <b class="num">${baht(got)}</b> จาก ${baht(total)}</span><span class="lbl">${gs.filter(x => x.st === 'ok').length}/${gs.length} คน</span></div>
@@ -755,6 +902,7 @@ function drawPay() {
   const others = (b.others || []).map(o => `<div class="item" style="padding:8px 14px"><div class="mid">${esc(o.name)}</div><span class="pill ${o.st === 'wait' ? 'warn' : 'ok'}">${o.st === 'wait' ? 'ยังไม่จ่าย' : o.st === 'ok' ? 'ได้รับแล้ว' : 'จ่ายแล้ว'}</span></div>`).join('');
   $('#app').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><div class="lbl">${esc([b.title, b.group].filter(Boolean).join(' · '))} · เห็นเฉพาะยอดของคุณ</div><span class="pill soft">คนที่ต้องจ่าย</span></div>
+    ${partsView(b)}
     ${b.rcpt ? '<button type="button" class="lnk" id="seeRc" style="align-self:flex-start;padding:0">🧾 ดูรูปใบเสร็จ</button>' : ''}
     <div class="sec qrbox">
       ${st !== 'wait' ? '<img src="jod-cheer.png?v=100" alt="" style="width:88px;height:88px;image-rendering:auto">' : ''}
