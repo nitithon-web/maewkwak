@@ -82,7 +82,7 @@ function draw() {
   $('#back').classList.toggle('hide', !stack.length);
   $('#foot').classList.add('hide');
   scrollTo(0, 0);
-  ({ home: drawHome, create: drawCreate, track: drawTrack, pay: drawPay }[view.name] || drawHome)();
+  ({ home: drawHome, create: drawCreate, track: drawTrack, pay: drawPay, poolNew: drawPoolNew, pool: drawPool }[view.name] || drawHome)();
 }
 function foot(html) { $('#footIn').innerHTML = html; $('#foot').classList.remove('hide'); }
 
@@ -104,8 +104,11 @@ function drawHome() {
     </div>
     <div class="sec list"><div class="sec-h">ต้องจ่าย</div>${oweRows || '<div class="empty">ไม่มียอดที่ต้องจ่าย</div>'}</div>
     <div class="sec list"><div class="sec-h">รอรับคืน (ฉันจ่ายก่อน)</div>${getRows || '<div class="empty">ยังไม่มีบิลที่คุณจ่ายก่อน</div>'}</div>
+    ${home.group ? `<div class="sec list"><div class="sec-h">🏦 กองกลางในกลุ่มนี้</div>${(home.pools || []).map(x => `<button class="row-btn item" type="button" data-pool="${esc(x.id)}"><div class="mid"><div class="nm">${esc(x.name)}${x.status === 'closed' ? ' <span class="pill soft">ปิดแล้ว</span>' : ''}</div><div class="lbl">${esc(x.holder)}ถือกอง${x.myBalS ? ' · ของฉัน' + (x.myBalS > 0 ? 'เหลือ ' : 'ใช้เกิน ') + baht(Math.abs(x.myBalS)) : ''}</div></div><div class="amt">${baht(x.leftS)}</div></button>`).join('') || '<div class="empty">ยังไม่มีกองกลาง</div>'}<button class="row-btn item" type="button" id="newPool"><span class="lnk" style="padding:0">+ สร้างกองกลาง (ทุกคนลงเงินก่อน แล้วจ่ายจากกอง)</span></button></div>` : ''}
     ${home.me.ppSet || home.me.qr || home.me.qrImg || home.me.bank ? '' : `<button class="row-btn sec item" type="button" id="setPay"><div class="mid"><div class="nm">ตั้งช่องทางรับเงิน</div><div class="lbl">อัปรูป QR ใส่พร้อมเพย์ หรือเลขบัญชีธนาคาร เพื่อนจะได้จ่ายง่าย</div></div><span class="lnk">ตั้งเลย</span></button>`}`;
   $('#app').querySelectorAll('[data-bill]').forEach(b => b.onclick = () => openBill(b.dataset.bill));
+  $('#app').querySelectorAll('[data-pool]').forEach(b => b.onclick = () => openPool(b.dataset.pool));
+  const np = $('#newPool'); if (np) np.onclick = () => { ps = { name: '', each: '', my: '', people: ((home.group && home.group.members) || []).map(m => ({ uid: m.uid, name: m.name, on: false, inS: '' })) }; show({ name: 'poolNew' }); };
   const sp = $('#setPay'); if (sp) sp.onclick = () => openMe();
   foot(home.group ? '<button class="btn ink" type="button" id="newBill">สร้างบิลใหม่ (ฉันจ่ายก่อน)</button>' : '<div class="lbl" style="text-align:center">สร้างบิลได้จากในกลุ่ม: พิมพ์ หาร แล้วกดสร้างบิลใหม่</div>');
   const nb = $('#newBill'); if (nb) nb.onclick = () => openCreate();
@@ -209,7 +212,8 @@ function drawCreate() {
   $('#ttl').textContent = cs.edit ? 'แก้บิล' : 'สร้างบิล';
   const mem = cs.people.filter(p => !p.me && !p.out);
   $('#app').innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between"><h1>${cs.edit ? 'แก้บิล' : 'สร้างบิล'}</h1><span class="pill ink">โหมดคนจ่ายก่อน</span></div>
+    <div style="display:flex;align-items:center;justify-content:space-between"><h1>${cs.edit ? 'แก้บิล' : 'สร้างบิล'}</h1><span class="pill ink">${cs.pool ? '🏦 จ่ายจากกอง' : 'โหมดคนจ่ายก่อน'}</span></div>
+    ${cs.pool ? `<div class="sec" style="padding:10px 14px"><div class="nm">🏦 จ่ายจากกองกลาง "${esc(cs.poolName)}"</div><div class="lbl">ไม่มีใครต้องโอน ระบบจดว่าแต่ละคนใช้เงินกองเท่าไหร่ ไว้คิดตอนปิดกอง</div></div>` : ''}
     <div class="sec" style="padding:12px 14px;display:flex;gap:12px">
       <label class="field" style="flex:1.4"><span class="lbl">ค่าอะไร</span><input id="cTitle" type="text" maxlength="60" placeholder="เช่น ชาบู ค่าคอร์ต" value="${esc(cs.title)}"></label>
       <label class="field" style="flex:1"><span class="lbl">ยอดรวม (บาท)</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}"></label>
@@ -226,10 +230,10 @@ function drawCreate() {
       <button type="button" class="row-btn item" id="addOut"><span class="lnk" style="padding:0">+ เพิ่มคนนอกกลุ่ม</span></button>
     </div>
     ${mem.length ? '<div class="lbl" style="padding:0 4px">ไม่เห็นชื่อใคร ให้คนนั้นแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก หรือเพิ่มเป็นคนนอกกลุ่มไปก่อน</div>' : '<div class="lbl" style="padding:0 4px">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก (พิมพ์ แมวกวัก ในกลุ่มเพื่อเรียกการ์ด) แล้วกลับมาที่หน้านี้ใหม่</div>'}
-    ${payBlock()}`;
+    ${cs.pool ? '' : payBlock()}`;
   bindCreate();
   const su = $('#selfU'); if (su) su.onchange = () => { cs.selfUnits = su.checked; };
-  foot(`<div class="sum"><span class="lbl" id="fl"></span><span id="fr" style="font-weight:600"></span></div><button class="btn ink" type="button" id="send">${cs.edit ? 'บันทึกและส่งบิลเข้ากลุ่ม' : 'ส่งบิลเข้ากลุ่ม'}</button>`);
+  foot(`<div class="sum"><span class="lbl" id="fl"></span><span id="fr" style="font-weight:600"></span></div><button class="btn ink" type="button" id="send">${cs.pool ? 'บันทึกบิลจากกอง' : cs.edit ? 'บันทึกและส่งบิลเข้ากลุ่ม' : 'ส่งบิลเข้ากลุ่ม'}</button>`);
   $('#send').onclick = submitCreate;
   refresh();
 }
@@ -302,7 +306,7 @@ function bindCreate() {
   });
   $('#rcBtn').onclick = () => readReceipt($('#rcBtn'));
   $('#addOut').onclick = addOutsider;
-  $('#chgPay').onclick = () => openMe();
+  const cp = $('#chgPay'); if (cp) cp.onclick = () => openMe();
   if (cs.mode === 'items') {
     A.querySelectorAll('[data-iname]').forEach(i => i.oninput = () => { cs.items[+i.dataset.iname].name = i.value; });
     A.querySelectorAll('[data-iprice]').forEach(i => i.oninput = () => { cs.items[+i.dataset.iprice].price = i.value; refresh(); });
@@ -420,13 +424,21 @@ async function submitCreate() {
   const me = cs.people.find(p => p.me);
   const itemsFor = k => cs.mode === 'items' ? cs.items.filter(it => it.who.indexOf(k) > -1).map(it => it.name || 'เมนู') : [];
   const payload = {
-    b: cs.edit || '', title: cs.title.trim(), totalS: r.T, mode: cs.mode, unit: cs.unit, selfUnits: cs.mode === 'hours' && cs.selfUnits, cat: cs.cat, rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt, payerIn: me.on, payerShareS: me.on ? r.amt.me || 0 : 0, payerUnits: me.units, payerItems: itemsFor('me'),
+    b: cs.edit || '', pool: cs.pool || '', title: cs.title.trim(), totalS: r.T, mode: cs.mode, unit: cs.unit, selfUnits: cs.mode === 'hours' && cs.selfUnits, cat: cs.cat, rcpt: cs.rcpt, keepRcpt: cs.hadRcpt && !cs.rcpt, payerIn: me.on, payerShareS: me.on ? r.amt.me || 0 : 0, payerUnits: me.units, payerItems: itemsFor('me'),
     members: cs.people.filter(p => p.on && !p.me).map(p => ({ uid: p.uid, name: p.name, byUid: p.out ? p.byUid : '', amtS: r.amt[p.key] || 0, units: cs.mode === 'hours' ? p.units : 0, items: itemsFor(p.key) })),
     items: cs.mode === 'items' ? cs.items.map(it => ({ name: it.name || 'เมนู', priceS: toS(it.price), who: it.who })) : [],
   };
   busy(btn, true);
   try {
     const d = await call(cs.edit ? 'hk_edit' : 'hk_create', payload);
+    if (d.pool) {   // 🏦 บิลจากกอง: แจ้งกลุ่มสั้นๆ แล้วกลับหน้ากอง
+      await postToChat(d.msg);
+      toast('บันทึกบิลจากกองแล้ว');
+      stack = [{ name: 'home' }];
+      view = { name: 'pool', pool: d.pool };
+      draw();
+      return;
+    }
     const sent = await postToChat(d.msg);
     toast(sent ? 'ส่งบิลเข้ากลุ่มแล้ว' : 'บันทึกบิลแล้ว');
     await loadHome();
@@ -434,6 +446,89 @@ async function submitCreate() {
     view = { name: 'track', bill: d.bill, unsent: !sent ? d.msg : null };
     draw();
   } catch (e) { toast(e.message); busy(btn, false); }
+}
+
+/* ===================== 🏦 กองกลาง ===================== */
+let ps = null;
+function drawPoolNew() {
+  $('#ttl').textContent = 'สร้างกองกลาง';
+  const on = ps.people.filter(p => p.on);
+  const sum = toS(ps.my) + on.reduce((x, p) => x + toS(p.inS), 0);
+  $('#app').innerHTML = `
+    <h1>สร้างกองกลาง</h1>
+    <div class="lbl" style="padding:0 4px">คุณเป็นคนถือเงินกอง เพื่อนจะได้บิล "ลงกอง" ให้โอนเข้าคุณ แล้วค่าใช้จ่ายระหว่างทริปให้คุณกด "จ่ายจากกอง" จบทริปกดปิดกอง ระบบคิดให้ว่าใครเติม ใครได้คืน</div>
+    <div class="sec" style="padding:12px 14px;display:flex;gap:12px">
+      <label class="field" style="flex:1.4"><span class="lbl">ชื่อกอง</span><input id="pName" type="text" maxlength="40" placeholder="เช่น ทริปเขาใหญ่" value="${esc(ps.name)}"></label>
+      <label class="field" style="flex:1"><span class="lbl">ลงคนละ (บาท)</span><input id="pEach" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(ps.each)}"></label>
+    </div>
+    <div class="sec list">
+      <div class="item"><div class="mid"><div class="nm">${esc(home.me.disp || 'ฉัน')} (ฉัน)</div><div class="lbl">ถือเงินกอง · ส่วนที่ฉันลงเอง</div></div><input class="amt-in num" data-pmy inputmode="decimal" placeholder="0" value="${esc(ps.my)}"></div>
+      ${ps.people.map((p, i) => `<div class="item ${p.on ? '' : 'dim'}"><button type="button" class="chk" data-pon="${i}" aria-pressed="${p.on}" aria-label="${esc(p.name)} ลงกอง">${p.on ? '✓' : ''}</button><div class="mid"><div class="nm">${esc(p.name)}</div></div>${p.on ? `<input class="amt-in num" data-pin="${i}" inputmode="decimal" placeholder="0" value="${esc(p.inS)}">` : ''}</div>`).join('') || '<div class="empty">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวักก่อน</div>'}
+    </div>`;
+  const A = $('#app');
+  $('#pName').oninput = e => { ps.name = e.target.value; };
+  $('#pEach').oninput = e => { ps.each = e.target.value; ps.my = ps.each; ps.people.forEach(p => { if (p.on) p.inS = ps.each; }); A.querySelectorAll('[data-pin]').forEach(i => { i.value = ps.each; }); A.querySelector('[data-pmy]').value = ps.each; sumFoot(); };
+  A.querySelector('[data-pmy]').oninput = e => { ps.my = e.target.value; sumFoot(); };
+  A.querySelectorAll('[data-pon]').forEach(b => b.onclick = () => { const p = ps.people[+b.dataset.pon]; p.on = !p.on; if (p.on && !p.inS) p.inS = ps.each; drawPoolNew(); });
+  A.querySelectorAll('[data-pin]').forEach(i => i.oninput = () => { ps.people[+i.dataset.pin].inS = i.value; sumFoot(); });
+  function sumFoot() { const t = toS(ps.my) + ps.people.filter(p => p.on).reduce((x, p) => x + toS(p.inS), 0); const el = $('#pSum'); if (el) el.textContent = 'รวมเงินกอง ' + baht(t); }
+  foot(`<div class="sum"><span class="lbl">${on.length} คนลงกอง + คุณ</span><span id="pSum" style="font-weight:600">รวมเงินกอง ${baht(sum)}</span></div><button class="btn ink" type="button" id="pGo">สร้างกองและส่งบิลลงกองเข้ากลุ่ม</button>`);
+  $('#pGo').onclick = async () => {
+    if (!ps.name.trim()) { $('#pName').focus(); toast('ตั้งชื่อกองก่อน'); return; }
+    const members = ps.people.filter(p => p.on).map(p => ({ uid: p.uid, inS: toS(p.inS) }));
+    if (!members.length) { toast('แตะเลือกเพื่อนที่ลงกองอย่างน้อย 1 คน'); return; }
+    const b = $('#pGo'); busy(b, true);
+    try {
+      const d = await call('hk_pool_new', { name: ps.name.trim(), myInS: toS(ps.my), members: members });
+      const sent = d.msg ? await postToChat(d.msg) : true;
+      toast(sent ? 'สร้างกองแล้ว ส่งบิลลงกองเข้ากลุ่มแล้ว' : 'สร้างกองแล้ว');
+      await loadHome();
+      stack = [{ name: 'home' }]; view = { name: 'pool', pool: d.pool }; draw();
+    } catch (e) { toast(e.message); busy(b, false); }
+  };
+}
+async function openPool(id) {
+  $('#app').innerHTML = '<div class="msg"><div class="spin" role="status" aria-label="กำลังโหลด"></div></div>';
+  try { const d = await call('hk_pool', { p: id }); show({ name: 'pool', pool: d.pool }); }
+  catch (e) { toast(e.message); draw(); }
+}
+function drawPool() {
+  const P = view.pool, open = P.status === 'open';
+  $('#ttl').textContent = '🏦 ' + P.name;
+  const row = r => `<div class="item"><div class="mid"><div class="nm">${esc(r.name)}${r.holder ? ' <span class="pill soft">ถือกอง</span>' : ''}${r.me ? ' (ฉัน)' : ''}</div>
+      <div class="lbl">ลง ${baht(r.inS)}${r.planS && r.inS < r.planS ? ' (ยังไม่โอน ' + baht(r.planS) + ')' : r.st === 'told' ? ' · แจ้งโอนแล้ว' : ''} · ใช้ ${baht(r.useS)}</div></div>
+      <div class="amt" style="color:${r.balS < 0 ? 'var(--bad)' : r.balS > 0 ? 'var(--ok)' : 'inherit'}">${r.balS > 0 ? 'เหลือ ' : r.balS < 0 ? 'ขาด ' : ''}${baht(Math.abs(r.balS))}</div></div>`;
+  $('#app').innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div><h1>${esc(P.name)}</h1><div class="sub">${esc(P.holder)}ถือเงินกอง${open ? '' : ' · ปิดกองแล้ว'}</div></div><span class="pill ${open ? 'ink' : 'soft'}">${open ? 'เปิดอยู่' : 'ปิดแล้ว'}</span></div>
+    <div class="hero">
+      <div class="sec"><div class="lbl">ลงกองแล้ว</div><div class="big">${baht(P.inS)}</div><div class="lbl">ใช้ไป ${baht(P.spentS)}</div></div>
+      <div class="dark"><div class="lbl">${P.leftS >= 0 ? 'เงินกองเหลือ' : 'กองขาด'}</div><div class="big">${baht(Math.abs(P.leftS))}</div><div class="lbl">${P.bills.length} บิลจากกอง</div></div>
+    </div>
+    <div class="sec list"><div class="sec-h">แต่ละคน (ลง − ใช้)</div>${P.rows.map(row).join('')}</div>
+    <div class="sec list"><div class="sec-h">บิลที่จ่ายจากกอง</div>${P.bills.map(b => `<div class="item"><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))}</div></div><div class="amt">${baht(b.totalS)}</div></div>`).join('') || '<div class="empty">ยังไม่มีบิลที่จ่ายจากกอง</div>'}</div>
+    ${!open && P.refunds.length ? `<div class="sec list"><div class="sec-h">คืนเงินจากกอง</div>${P.refunds.map(r => `<div class="item"><div class="mid"><div class="nm">${esc(P.holder)} คืน ${esc(r.name)}</div></div><span class="num h">${baht(r.amtS)}</span>${P.isHolder ? `<button type="button" class="btn sm ${r.done ? '' : 'ink'}" data-rf="${esc(r.k)}" data-done="${r.done ? 1 : ''}">${r.done ? 'คืนแล้ว ✓' : 'คืนแล้ว'}</button>` : `<span class="pill ${r.done ? 'ok' : 'soft'}">${r.done ? 'ได้คืนแล้ว' : 'รอคืน'}</span>`}</div>`).join('')}</div>` : ''}
+    <div class="lbl" style="padding:0 4px">${open ? 'ปิดกองเมื่อจบทริป: คนที่ใช้เกินจะได้บิล "เติมกอง" ส่วนคนที่เหลือ คนถือกองคืนให้ คนที่ยังไม่โอนลงกอง คิดรวมในยอดเติมให้เลย' : 'ปิดกองแล้ว ยอดเติมกองอยู่ในบิล "เติมกอง" ในหน้าแรก'}</div>`;
+  const A = $('#app');
+  A.querySelectorAll('[data-rf]').forEach(b => b.onclick = async () => {
+    busy(b, true);
+    try { const d = await call('hk_refund', { p: P.id, k: b.dataset.rf, undo: !!b.dataset.done }); view.pool = d.pool; drawPool(); } catch (e) { toast(e.message); busy(b, false); }
+  });
+  if (P.isHolder && open) {
+    foot(`<button class="btn ink" type="button" id="pSpend">+ จ่ายบิลจากกองนี้</button><button class="btn" type="button" id="pClose">ปิดกองและคิดเงินคืน/เติม</button>`);
+    $('#pSpend').onclick = () => {
+      openCreate();
+      cs.pool = P.id; cs.poolName = P.name; cs.cat = 'trip';
+      const inPool = new Set(P.members.map(m => m.uid));
+      cs.people.forEach(p => { if (!p.me) p.on = inPool.has(p.uid); });
+      drawCreate();
+    };
+    $('#pClose').onclick = async () => {
+      if (!confirm('ปิดกอง ' + P.name + '?\nหลังปิดจะจ่ายบิลจากกองเพิ่มไม่ได้ ระบบจะส่งยอดคืน/เติมของแต่ละคนเข้ากลุ่ม')) return;
+      const b = $('#pClose'); busy(b, true);
+      try { const d = await call('hk_pool_close', { p: P.id }); await postToChat(d.msg); await loadHome(); view.pool = d.pool; toast('ปิดกองแล้ว'); drawPool(); }
+      catch (e) { toast(e.message); busy(b, false); }
+    };
+  }
 }
 
 /* ===================== โหมดคนจ่ายก่อน: ติดตาม ===================== */
