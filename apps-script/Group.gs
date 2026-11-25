@@ -60,13 +60,13 @@ function grpTab_(name, headers) {
 }
 function grpSheet_() { return grpTab_(GRP_SHEET, GRP_HEADERS); }
 
-function grpRows_(withPools) {   // 🏦 กองกลาง (kind:'pool') อยู่แท็บเดียวกัน แต่ไม่ใช่บิล → กรองออก เว้นแต่ขอ
+function grpRows_(withPools) {   // 🏦 กองกลาง (kind:'pool') + ประวัติกลุ่ม (kind:'ghist') อยู่แท็บเดียวกัน แต่ไม่ใช่บิล → กรองออก เว้นแต่ขอ (true = รวมกอง, 'all' = ทุกแถว)
   const sh = grpSheet_(), last = sh.getLastRow();
   if (last < 2) return [];
   return sh.getRange(2, 1, last - 1, GRP_HEADERS.length).getDisplayValues().map(r => {
     if (!r[0]) return null;
     try { return grpUp_(Object.assign(JSON.parse(r[3] || '{}'), { id: r[0], gid: r[1], token: r[2] })); } catch (e) { return null; }
-  }).filter(b => b && (withPools || b.kind !== 'pool'));
+  }).filter(b => b && (withPools === 'all' || (b.kind !== 'ghist' && (withPools || b.kind !== 'pool'))));
 }
 /** บิลรุ่นแรก (paid true/false) → สถานะ wait/told/ok */
 function grpUp_(b) {
@@ -244,6 +244,7 @@ function hkCardFlex_(b, label) {
         { type: 'box', layout: 'horizontal', alignItems: 'center', contents: [
           { type: 'text', text: label || 'บิล', size: 'xs', color: '#3a3f39', flex: 1 }, hkMascot_('34px', b.members.every(m => m.st !== 'wait') ? 'cheer' : '')] },
         { type: 'text', text: b.title || 'หารกัน', weight: 'bold', size: 'lg', wrap: true, color: HK_INK },
+        ...(b.parts ? [{ type: 'text', text: cut_(b.parts.map(pt => pt.name).join(' + '), 120), size: 'xs', color: HK_INK, wrap: true }] : []),
         { type: 'text', text: b.payer.name + ' จ่ายก่อน · ยอดของแต่ละคนดูได้เฉพาะตัวเอง', size: 'xs', color: HK_MUTE, wrap: true },
         { type: 'separator', margin: 'md' },
         { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: rows.length ? rows : [{ type: 'text', text: 'ไม่มีใครต้องจ่าย', size: 'sm', color: HK_MUTE }] }] },
@@ -584,6 +585,19 @@ function hkClaim_(gid, uid, nick) {
 }
 
 /* ===================== ลงหน้าค้างกัน/รายจ่ายของเจ้าของ ===================== */
+/** บิลหลายรายการ: จดรายจ่ายส่วนของเราแยกตามหมวดของแต่ละรายการ (ks = แถวที่เป็นของเรา, 'me' = เราเป็นคนจ่ายก่อน) */
+function grpSelfMoney_(b, ks, suffix) {
+  const by = {}, all = moneyAll_();
+  b.parts.forEach(pt => {
+    const v = ks.reduce((a, k) => a + ((pt.sh || {})[k] || 0), 0);
+    if (!v) return;
+    const cat = HK_CAT_MONEY[pt.cat] || moneyGuessCat_('out', pt.name, all) || 'อาหาร';
+    const g = by[cat] = by[cat] || { s: 0, names: [] };
+    g.s += v; g.names.push(pt.name);
+  });
+  const cats = Object.keys(by);
+  return cats.map(cat => moneySave_({ type: 'out', date: b.date, amount: by[cat].s / 100, note: b.title + (cats.length > 1 ? ': ' + by[cat].names.join(', ') : '') + suffix, cat: cat }).id);
+}
 function grpOweCreate_(b) {
   const owner = props.getProperty('LINE_USER_ID');
   if (!owner) return null;
@@ -591,7 +605,9 @@ function grpOweCreate_(b) {
   if (b.poolRole === 'spend') {   // 🏦 บิลที่จ่ายจากกอง: จดรายจ่ายเฉพาะส่วนของเรา ไม่มีใครค้างใคร
     const selfS = (b.payer.uid === owner ? b.payer.shareS || 0 : 0) + grpSum_(b.members.filter(m => grpResp_(m) === owner));
     if (!selfS) return null;
-    const mm = moneySave_({ type: 'out', date: b.date, amount: selfS / 100, note: b.title + ' (กองกลาง' + (b.poolName ? ' ' + b.poolName : '') + ') · ส่วนของฉัน', cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
+    const suf = ' (กองกลาง' + (b.poolName ? ' ' + b.poolName : '') + ') · ส่วนของฉัน';
+    if (b.parts) return { money: grpSelfMoney_(b, (b.payer.uid === owner ? ['me'] : []).concat(b.members.filter(m => grpResp_(m) === owner).map(m => m.k)), suf) };
+    const mm = moneySave_({ type: 'out', date: b.date, amount: selfS / 100, note: b.title + suf, cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
     return { money: mm.id };
   }
   const date = b.date, docs = oweAll_();
@@ -613,8 +629,9 @@ function grpOweCreate_(b) {
       transfers: list.map(d => ({ from: d.person, to: 'ฉัน', amount: d.amount, done: false })) };
     let mid = '';
     if (selfS) {
-      const mm = moneySave_({ type: 'out', date: date, amount: selfS / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน' + (selfNote.length ? ' + จ่ายแทน' + selfNote.join(', ') : ''), cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
-      mid = mm.id; sp.moneyId = mid;
+      const suf = ' (กลุ่ม) · ส่วนของฉัน' + (selfNote.length ? ' + จ่ายแทน' + selfNote.join(', ') : '');
+      if (b.parts) { mid = grpSelfMoney_(b, ['me'].concat(b.members.filter(m => grpResp_(m) === owner).map(m => m.k)), suf); sp.moneyId = mid[0] || ''; }
+      else { const mm = moneySave_({ type: 'out', date: date, amount: selfS / 100, note: b.title + suf, cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' }); mid = mm.id; sp.moneyId = mid; }
     }
     oweSave_([sp].concat(list));
     return { split: sid, debts: debts, money: mid };
@@ -623,12 +640,13 @@ function grpOweCreate_(b) {
   if (!mine.length) return null;
   const amt = grpSum_(mine);
   const d = { id: oweId_(), kind: 'debt', person: owePerson_(b.payer.name, docs), dir: 'me', amount: amt / 100, date: date, title: b.title, gbill: b.id, payments: [], status: 'open', created: date };
-  const mm = moneySave_({ type: 'out', date: date, amount: amt / 100, note: b.title + ' (กลุ่ม) · ส่วนของฉัน (' + b.payer.name + ' จ่ายก่อน)', cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' });
-  d.moneyId = mm.id;
+  const suf = ' (กลุ่ม) · ส่วนของฉัน (' + b.payer.name + ' จ่ายก่อน)';
+  const money = b.parts ? grpSelfMoney_(b, mine.map(m => m.k), suf) : moneySave_({ type: 'out', date: date, amount: amt / 100, note: b.title + suf, cat: HK_CAT_MONEY[b.cat] || moneyGuessCat_('out', b.title, moneyAll_()) || 'อาหาร' }).id;
+  d.moneyId = [].concat(money)[0] || '';
   oweSave_([d]);
   const debts = {};
   mine.forEach(m => { debts[m.k] = d.id; });
-  return { debts: debts, money: mm.id, mine: true };
+  return { debts: debts, money: money, mine: true };
 }
 
 function grpOwePay_(b, m) {
@@ -653,7 +671,7 @@ function grpOweVoid_(b) {
   const ids = [...new Set(Object.values(b.owe.debts || {}))];
   if (b.owe.split) ids.push(b.owe.split);
   if (ids.length) oweDelete_(ids);
-  if (b.owe.money) { try { moneyDelete_(b.owe.money); } catch (e) {} }
+  [].concat(b.owe.money || []).forEach(id => { try { moneyDelete_(id); } catch (e) {} });
   b.owe = null;
 }
 
@@ -768,7 +786,9 @@ function hkView_(b, me) {
   const g = grpCfg_()[b.gid] || {};
   const row = m => ({ k: m.k, uid: m.uid || '', name: m.name, out: !!m.out, by: m.by ? m.by.name : '', byUid: m.by ? m.by.uid : '', byMe: !!(m.by && m.by.uid === me.uid), amtS: m.amtS, units: m.units || 0, items: m.items || [], st: m.st, at: m.at || '', slip: !!m.slip, auto: !!m.auto, via: m.via || '' });
   const v = { id: b.id, title: b.title, date: b.date, mode: b.mode || 'equal', unit: b.unit || 'ชม.', status: b.status, group: g.name || '', payer: b.payer.name, isPayer: isPayer, created: b.created, totalS: b.totalS,
-    cat: b.cat || '', rcpt: !!b.rcpt, selfUnits: !!b.selfUnits, canUnits: hkUnitsOpen_(b) && !isPayer && mine.some(m => !m.by) };
+    cat: b.cat || '', rcpt: !!b.rcpt, selfUnits: !!b.selfUnits, canUnits: hkUnitsOpen_(b) && !isPayer && mine.some(m => !m.by), calc: b.calc || null };
+  if (b.parts) v.parts = isPayer ? b.parts : b.parts.map(pt => ({ name: pt.name, cat: pt.cat, mode: pt.mode, unit: pt.unit, rateS: pt.rateS, qty: pt.qty,
+    mineS: mine.reduce((a, m) => a + ((pt.sh || {})[m.k] || 0), 0), units: mine.reduce((a, m) => a + ((pt.u || {})[m.k] || 0), 0) })).filter(pt => pt.mineS > 0);
   if (isPayer) {
     Object.assign(v, { payerIn: b.payerIn !== false, payerShareS: b.payer.shareS || 0, payerUnits: b.payer.units || 0, payerItems: b.payer.items || [], rows: b.members.map(row), items: b.items || [] });
   } else {
@@ -786,7 +806,7 @@ function hkView_(b, me) {
 function hkHome_(me, grp) {
   const cfg = grpCfg_(), today = todayStr_();
   const owe = [], get = [];
-  const all = grpRows_(true), rows = all.filter(b => b.kind !== 'pool');
+  const all = grpRows_('all'), rows = all.filter(b => b.kind !== 'pool' && b.kind !== 'ghist');
   rows.filter(b => b.status !== 'void' && b.status !== 'pool').forEach(b => {
     const gname = (cfg[b.gid] || {}).name || '';
     const old = daysBetween_(b.date, today) > 14;
@@ -810,6 +830,7 @@ function hkHome_(me, grp) {
   if (grp) {
     const seen = grp.g.seen || {};
     res.group = { name: grp.g.name || '', members: Object.keys(seen).filter(u => u !== me.uid).map(u => ({ uid: u, name: seen[u] })) };
+    res.hist = grpHistList_(grp.gid, all);
     res.pools = poolList_(grp.gid, all).filter(x => poolIn_(x, me.uid) && (x.status === 'open' || daysBetween_(String(x.closed || x.created).slice(0, 10), today) <= 14)).map(x => poolBrief_(x, me, rows));
   }
   return res;
@@ -935,7 +956,12 @@ function hkCreate_(me, grp, p, old) {
     payer: { uid: me.uid, name: me.disp, shareS: shareS, units: Number(p.payerUnits) || 0, items: (p.payerItems || []).map(String).slice(0, 30) },
     members: members, edited: old ? stamp_() : '',
   });
+  const parts = pool && pool.equal ? null : hkParts_(p, members, shareS, totalS);
+  if (parts) { b.parts = parts; b.selfUnits = false; if (!b.cat) b.cat = parts.slice().sort((x, y) => y.totalS - x.totalS)[0].cat || ''; } else delete b.parts;
+  const rateS = Math.max(0, Math.round(Number(p.rateS) || 0));
+  if (!parts && rateS) b.calc = { rateS: rateS, qty: Math.max(0, Number(p.qty) || 0), unit: String(p.calcUnit || p.unit || '').slice(0, 10) }; else delete b.calc;
   b.status = members.every(m => m.st === 'ok') ? 'done' : 'open';
+  if (!old) { try { grpHistAdd_(b); } catch (e) { console.warn('ghist: ' + e); } }
   if (pool) {
     Object.assign(b, { status: 'pool', pool: pool.id, poolRole: 'spend', poolName: pool.name });
     b.members.forEach(m => { m.st = 'ok'; });
@@ -946,6 +972,61 @@ function hkCreate_(me, grp, p, old) {
     return { pool: poolView_(pool, me), msg: poolFlex_(pool, b, old ? 'แก้' : '') };
   }
   return { bill: hkView_(b, me), msg: hkCardFlex_(b, old ? 'แก้บิล' : 'บิลใหม่') };
+}
+
+/** 🧩 รายการย่อยในบิลเดียว (ค่าคอร์ท + ค่าลูก + ข้าว + ค่ารถ) แต่ละรายการมีหมวด/วิธีหารของตัวเอง
+ * parts[]: { name, cat, mode, unit, rateS, qty, totalS, sh{k: ยอด} ('me' = คนจ่ายก่อน), u{k: จำนวน}, items[] } · ผลรวมทุกรายการต้องตรงยอดของแต่ละคน */
+function hkParts_(p, members, payerShareS, totalS) {
+  const raw = Array.isArray(p.parts) ? p.parts.slice(0, 12) : [];
+  if (raw.length < 2) return null;   // รายการเดียว = บิลปกติ
+  const keys = {};
+  members.forEach(m => { keys[m.k] = 0; });
+  keys.me = 0;
+  const parts = raw.map(x => {
+    const name = String(x.name || '').trim().slice(0, 60) || 'รายการ', sh = {}, u = {};
+    Object.keys(x.sh || {}).forEach(k => {
+      const v = Math.round(Number(x.sh[k]) || 0);
+      if (!v) return;
+      if (v < 0 || !Object.prototype.hasOwnProperty.call(keys, k)) throw new Error('ยอดของรายการ "' + name + '" ไม่ถูกต้อง');
+      sh[k] = v; keys[k] += v;
+    });
+    Object.keys(x.u || {}).forEach(k => { if (Object.prototype.hasOwnProperty.call(keys, k)) u[k] = Math.round((Number(x.u[k]) || 0) * 2) / 2; });
+    const t = Math.round(Number(x.totalS) || 0);
+    if (t <= 0 || grpSum_(Object.keys(sh).map(k => ({ amtS: sh[k] }))) !== t) throw new Error('ยอดของรายการ "' + name + '" ยังไม่ครบ');
+    return { name: name, cat: Object.prototype.hasOwnProperty.call(HK_CAT_MONEY, String(x.cat || '')) ? String(x.cat) : '', mode: /^(equal|hours|items|custom)$/.test(x.mode) ? x.mode : 'custom',
+      unit: String(x.unit || '').slice(0, 10), rateS: Math.max(0, Math.round(Number(x.rateS) || 0)), qty: Math.max(0, Number(x.qty) || 0), totalS: t, sh: sh, u: u,
+      items: (Array.isArray(x.items) ? x.items : []).slice(0, 40).map(it => ({ name: String(it.name || '').slice(0, 60), priceS: Math.round(Number(it.priceS) || 0), who: (it.who || []).map(String).filter(k => Object.prototype.hasOwnProperty.call(keys, k)).slice(0, 40) })) };
+  });
+  if (grpSum_(parts.map(x => ({ amtS: x.totalS }))) !== totalS) throw new Error('ยอดทุกรายการรวมกันไม่ตรงยอดบิล');
+  if (keys.me !== payerShareS || members.some(m => keys[m.k] !== m.amtS)) throw new Error('ยอดของแต่ละคนไม่ตรงกับผลรวมของรายการ ลองกดส่งใหม่');
+  return parts;
+}
+
+/* ===================== 🕘 ประวัติรายการของกลุ่ม (ใช้บ่อย / ล่าสุด) =====================
+ * แถว kind:'ghist' ในแท็บ Group (ต่อกลุ่ม) items{ชื่อ: {name, cat, mode, unit, rateS, n, last}} เก็บ 60 รายการ */
+function grpHist_(gid, rows) { return (rows || grpRows_('all')).find(x => x.kind === 'ghist' && x.gid === gid) || null; }
+function grpHistAdd_(b) {
+  const list = b.parts ? b.parts.map(pt => ({ name: pt.name, cat: pt.cat, mode: pt.mode, unit: pt.unit, rateS: pt.rateS }))
+    : [{ name: b.title, cat: b.cat, mode: b.mode, unit: (b.calc || {}).unit || (b.mode === 'hours' ? b.unit : ''), rateS: (b.calc || {}).rateS || 0 }];
+  const h = grpHist_(b.gid) || { id: 'gh' + Utilities.getUuid().replace(/-/g, '').slice(0, 20), gid: b.gid, token: '', kind: 'ghist', items: {} };
+  list.forEach(x => {
+    const name = String(x.name || '').trim();
+    if (!name || name === 'หารกัน') return;
+    const key = name.toLowerCase(), o = h.items[key] || { n: 0 };
+    Object.assign(o, { name: name, cat: x.cat || o.cat || '', mode: x.mode || o.mode || 'equal', unit: x.unit || o.unit || '', rateS: x.rateS || o.rateS || 0, n: o.n + 1, last: stamp_() });
+    h.items[key] = o;
+  });
+  const ks = Object.keys(h.items);
+  if (ks.length > 60) ks.sort((a, c) => (h.items[a].n - h.items[c].n) || String(h.items[a].last).localeCompare(String(h.items[c].last))).slice(0, ks.length - 60).forEach(k => delete h.items[k]);
+  grpSave_(h);
+}
+function grpHistList_(gid, rows) {
+  const h = grpHist_(gid, rows);
+  if (!h) return { top: [], recent: [] };
+  const arr = Object.values(h.items).map(x => ({ name: x.name, cat: x.cat, mode: x.mode, unit: x.unit, rateS: x.rateS || 0, n: x.n, last: x.last }));
+  const top = arr.filter(x => x.n >= 2).sort((a, b) => (b.n - a.n) || String(b.last).localeCompare(String(a.last))).slice(0, 8);
+  const recent = arr.slice().sort((a, b) => String(b.last).localeCompare(String(a.last))).filter(x => top.indexOf(x) < 0).slice(0, 8);
+  return { top: top, recent: recent };
 }
 
 /* ===================== 🏦 กองกลางในกลุ่ม =====================
