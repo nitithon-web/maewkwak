@@ -163,9 +163,10 @@ function roundTransfers(tr) {
 }
 function sumExtra(r) {
   const R = Number(sp.round) || 0;
+  const pl = r.pool ? `<p class="note">${esc(poolLine(r.pool))}</p>` : '';
   const changed = (r.transfers || []).filter(t => t.rawS !== undefined && t.rawS !== t.amountS);
   return `<div class="s-round"><span class="lbl">ปัดยอดโอน</span><div class="seg s-rnd">${[[0, 'ไม่ปัด'], [1, '1 บาท'], [5, '5 บาท'], [10, '10 บาท']].map(([v, t]) => `<button type="button" data-r="${v}" class="${R === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>` +
-    (changed.length ? `<p class="note">🪙 ${changed.map(t => `${esc(who(t.from))} → ${esc(who(t.to))} ${bahtS(t.rawS)} ปัดเป็น ${bahtS(t.amountS)}`).join(' · ')}</p>` : '');
+    (changed.length ? `<p class="note">🪙 ${changed.map(t => `${esc(who(t.from))} → ${esc(who(t.to))} ${bahtS(t.rawS)} ปัดเป็น ${bahtS(t.amountS)}`).join(' · ')}</p>` : '') + pl;
 }
 document.addEventListener('click', e => {
   const c = e.target.closest && e.target.closest('.s-rnd button');
@@ -361,3 +362,74 @@ function scatRender() { renderTplRow(); renderMonth(); }
   setTimeout(go, 400);
 })();
 if ($('#spList')) scatRender();
+
+/* ---------- 🏦 กองกลางทริป (sp.pool = { on, holder, c: { คน: ยอดที่ลงกอง } }) ----------
+ * ทุกคนลงเงินกองก่อน (นับเหมือนจ่ายไปแล้ว) · บิลที่จ่ายจากกอง เลือกคนจ่าย = "🏦 กองกลาง"
+ * เงินกองที่เหลือ อยู่ที่คนถือกอง → คนถือกองต้องคืน (ถ้ากองขาด คนถือกองออกเพิ่ม = ได้คืน) · โอนให้จบในยอดโอนรวม
+ * ยอดลงกองไม่ใช่รายจ่าย: รายจ่ายของเรายังเป็นส่วนของเราเท่านั้น */
+function poolAdjust(net, paid) {
+  const P = sp && sp.pool;
+  if (!P || !P.on) return null;
+  const holder = sp.people.includes(P.holder) ? P.holder : ME;
+  let sumC = 0;
+  sp.people.forEach(p => { const c = toS((P.c || {})[p]); if (c) { net[p] = (net[p] || 0) + c; sumC += c; } });
+  const spent = paid.__pool || 0, left = sumC - spent;
+  net[holder] = (net[holder] || 0) - left;
+  return { sumC, spent, left, holder };
+}
+function poolLine(pl) {
+  if (!pl) return '';
+  const h = who(pl.holder);
+  return `🏦 กองกลาง: ลง ${bahtS(pl.sumC)} · จ่ายบิลไป ${bahtS(pl.spent)} · ${pl.left > 0 ? `เหลือ ${bahtS(pl.left)} อยู่ที่${h} (รวมอยู่ในสรุปโอนแล้ว)` : pl.left < 0 ? `ขาด ${bahtS(-pl.left)} ${h}ออกเพิ่ม (รวมอยู่ในสรุปโอนแล้ว)` : 'ใช้พอดี'}`;
+}
+function paintPool() {
+  const box = $('#sPool');
+  if (!box || !sp) return;
+  const P = sp.pool || { on: false, holder: ME, c: {} };
+  const used = sp.bills.some(b => b.payer === '__pool');
+  box.innerHTML = `<details class="s-pool"${P.on ? ' open' : ''}><summary>🏦 กองกลาง <small>${P.on ? 'ลงกอง ' + bahtS(sp.people.reduce((x, p) => x + toS((P.c || {})[p]), 0)) : 'ทุกคนลงเงินก่อน แล้วจ่ายบิลจากกอง'}</small></summary>
+    <label class="t-chk"><input type="checkbox" id="plOn" ${P.on ? 'checked' : ''}> ทริปนี้มีกองกลาง</label>
+    ${P.on ? `<label>ใครถือเงินกอง <select id="plHolder">${sp.people.map(p => `<option value="${esc(p)}" ${p === (sp.people.includes(P.holder) ? P.holder : ME) ? 'selected' : ''}>${esc(who(p))}</option>`).join('')}</select></label>
+    <div class="pl-eq"><span>ทุกคนลงคนละ</span><input id="plEq" inputmode="decimal" placeholder="บาท"><button type="button" class="mini" id="plEqGo">ใส่ให้ทุกคน</button></div>
+    <div class="pl-rows">${sp.people.map(p => `<label class="pl-r"><span>${esc(who(p))}</span><input inputmode="decimal" data-plp="${esc(p)}" value="${esc((P.c || {})[p] || '')}" placeholder="0"></label>`).join('')}</div>
+    <small class="hint">บิลที่จ่ายจากกอง ให้เลือก "ใครจ่ายไปก่อน" เป็น 🏦 กองกลาง${used ? '' : ' (ยังไม่มีบิลไหนจ่ายจากกอง)'}</small>` : ''}</details>`;
+  const d = box.querySelector('details');
+  box.querySelector('#plOn').onchange = e => {
+    sp.pool = Object.assign({ holder: ME, c: {} }, sp.pool || {}, { on: e.target.checked });
+    if (!sp.pool.on) sp.bills.forEach(b => { if (b.payer === '__pool') b.payer = ME; });   // ปิดกอง → บิลที่จ่ายจากกองกลับเป็นเรา
+    else sp.bills.forEach(b => { if (billBlank(b) || b.payer === ME) b.payer = '__pool'; });   // เปิดกอง: บิลของเรา → จ่ายจากกอง (เปลี่ยนได้)
+    paintSplit();
+    const dd = $('#sPool details'); if (dd) dd.open = true;
+  };
+  if (!P.on) return;
+  box.querySelector('#plHolder').onchange = e => { sp.pool.holder = e.target.value; paintSum(); };
+  box.querySelectorAll('[data-plp]').forEach(i => i.oninput = () => { (sp.pool.c = sp.pool.c || {})[i.dataset.plp] = i.value; paintSum(); d.querySelector('summary small').textContent = 'ลงกอง ' + bahtS(sp.people.reduce((x, p) => x + toS(sp.pool.c[p]), 0)); });
+  box.querySelector('#plEqGo').onclick = () => {
+    const v = box.querySelector('#plEq').value.trim();
+    if (!toS(v)) { box.querySelector('#plEq').focus(); return; }
+    sp.people.forEach(p => { sp.pool.c[p] = v; });
+    paintPool(); paintSum();
+  };
+}
+/* ข้อความสรุป + หน้ารายละเอียด (ใช้ข้อมูลที่บันทึกไว้ s.pool) */
+function poolCalcSaved(s) {
+  const P = s.pool;
+  if (!P || !P.on) return null;
+  const people = s.people || [];
+  const sumC = people.reduce((x, p) => x + toS((P.c || {})[p]), 0);
+  const spent = (s.bills || []).filter(b => b.payer === '__pool').reduce((x, b) => x + (toS(b.total) || Object.values(b.shares || {}).reduce((y, v) => y + toS(v), 0)), 0);
+  return { sumC, spent, left: sumC - spent, holder: people.includes(P.holder) ? P.holder : ME, c: P.c || {} };
+}
+function poolMsgLines(s) {
+  const pl = poolCalcSaved(s);
+  if (!pl) return [];
+  return ['', `กองกลาง (${whoMsg(pl.holder)} ถือ):`]
+    .concat((s.people || []).filter(p => toS(pl.c[p])).map(p => `• ${whoMsg(p)} ลง ${num(toS(pl.c[p]))}`))
+    .concat([`• จ่ายบิลจากกอง ${num(pl.spent)} · ${pl.left >= 0 ? 'เหลือ ' + num(pl.left) : 'ขาด ' + num(-pl.left)}`]);
+}
+function poolDetail(s) {
+  const pl = poolCalcSaved(s);
+  if (!pl) return '';
+  return `<div class="di-bill"><div class="di-h">🏦 กองกลาง · ${esc(who(pl.holder))}ถือเงินกอง</div>${(s.people || []).filter(p => toS(pl.c[p])).map(p => `<div class="di-r"><span>${esc(who(p))} ลงกอง</span><b>${bahtS(toS(pl.c[p]))}</b></div>`).join('')}
+    <div class="di-r"><span>จ่ายบิลจากกอง</span><b>${bahtS(pl.spent)}</b></div><div class="di-r tot"><span>${pl.left >= 0 ? 'เงินกองเหลือ (คืนในยอดโอน)' : 'กองขาด (คนถือกองออกเพิ่ม)'}</span><b>${bahtS(Math.abs(pl.left))}</b></div></div>`;
+}

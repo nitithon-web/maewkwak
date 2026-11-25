@@ -4,8 +4,8 @@
  */
 const ME = 'ฉัน';   // ค่าภายใน (ห้ามเปลี่ยน) ชื่อที่แสดงตั้งได้ที่ myName()
 const myName = () => { try { return (localStorage.getItem('myName') || '').trim(); } catch (e) { return ''; } };
-const who = p => p === ME ? (myName() || ME) : p;                 // ชื่อที่แสดงในหน้าจอ
-const whoMsg = p => p === ME ? (myName() || 'ผม') : p;           // ชื่อในข้อความที่ส่งเพื่อน
+const who = p => p === ME ? (myName() || ME) : p === '__pool' ? '🏦 กองกลาง' : p;   // ชื่อที่แสดงในหน้าจอ
+const whoMsg = p => p === ME ? (myName() || 'ผม') : p === '__pool' ? 'กองกลาง' : p;   // ชื่อในข้อความที่ส่งเพื่อน
 let owe = LS.get('owe', []);
 let oweLoaded = false;
 
@@ -600,8 +600,9 @@ function calcSplit() {
   });
   const net = {};
   sp.people.forEach(p => { net[p] = (paid[p] || 0) - (share[p] || 0); });
+  const pool = typeof poolAdjust === 'function' ? poolAdjust(net, paid) : null;   // 🏦 กองกลาง (scat.js)
   const tr = settle(net);
-  return { share, paid, total, transfers: typeof roundTransfers === 'function' ? roundTransfers(tr) : tr };
+  return { share, paid, total, pool, transfers: typeof roundTransfers === 'function' ? roundTransfers(tr) : tr };
 }
 
 function chipsHtml(sel, cls) {
@@ -610,6 +611,7 @@ function chipsHtml(sel, cls) {
 function paintSplit() {
   $('#sPeople').innerHTML = sp.people.map(p => `<button type="button" class="on${p === ME ? ' me' : ''}" data-p="${esc(p)}">${esc(who(p))}${p === ME ? ' ✏️' : ' ✕'}</button>`).join('');
   paintPick();
+  if (typeof paintPool === 'function') paintPool();
   $('#sPeople').onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.p === ME) { setMyName(); return; }
@@ -631,7 +633,7 @@ function paintSplit() {
         ${b.rTotal ? `<small>ยอดในใบเสร็จ ${bahtS(toS(b.rTotal))}</small>` : ''}
         ${b.aiCheck && !b.aiCheck.ok ? `<small class="s-warn">⚠️ เมนูที่ AI อ่านรวมกันแล้วไม่ตรงยอด (ต่าง ${bahtS(toS(Math.abs(b.aiCheck.diff)))}) เช็กเมนูกับใบเสร็จก่อนบันทึก</small>` : ''}
         ${b.file && b.file.id ? `<button type="button" class="link-btn s-flag" ${b.flagged ? 'disabled' : ''}>${b.flagged ? '✓ ส่งให้ทดสอบแล้ว' : 'AI อ่านผิด?'}</button>` : ''}</div>
-      <label>ใครจ่ายไปก่อน <select class="s-payer">${sp.people.map(p => `<option value="${esc(p)}" ${p === b.payer ? 'selected' : ''}>${esc(who(p))}</option>`).join('')}</select></label>
+      <label>ใครจ่ายไปก่อน <select class="s-payer">${(sp.pool && sp.pool.on ? ['__pool'] : []).concat(sp.people).map(p => `<option value="${esc(p)}" ${p === b.payer ? 'selected' : ''}>${esc(who(p))}</option>`).join('')}</select></label>
       <div class="seg s-method">${[['equal', 'เท่ากัน'], ['menu', 'ตามเมนู'], ['unit', 'ชม./ชิ้น'], ['custom', 'รายคน']].map(([v, t]) => `<button type="button" data-v="${v}" class="${b.method === v ? 'on' : ''}">${t}</button>`).join('')}</div>
       <div class="s-sug when-chips wrap"></div>
       <div class="s-body"></div>`;
@@ -769,7 +771,7 @@ function paintSum() {
   const rcpt = sp.bills.reduce((s2, b) => s2 + toS(b.rTotal || 0), 0);
   const diff = rcpt && Math.abs(rcpt - r.total) >= 100 ? `<p class="note warn">⚠️ ยอดที่หาร ${bahtS(r.total)} ไม่ตรงกับยอดในใบเสร็จ ${bahtS(rcpt)} (ต่าง ${bahtS(Math.abs(rcpt - r.total))}) ลองเช็ก Service / VAT / ส่วนลด หรือเมนูที่ขาด</p>` : '';
   const pays = sp.bills.map((b, bi) => (b.pays || []).length ? `<p class="note">💳 คนจ่ายใช้ ${esc(b.pays.map(d => d.n).join(', '))} ${bahtS(b.pays.reduce((x, d) => x + toS(d.a), 0))} แทนเงินสด · นับเป็นเงินที่${esc(who(b.payer))}ออกก่อน เพื่อนจ่ายตามราคาจริง <button type="button" class="link-btn pay-share" data-b="${bi}">หารเป็นส่วนลดทุกคนแทน</button></p>` : '').join('');
-  $('#sSum').innerHTML = `<h4>ส่วนของแต่ละคน</h4>${rows}<div class="tot"><span>รวม</span><b>${bahtS(r.total)}</b></div>${discBox(sp.bills, sp.people, 'edit')}${pays}${diff}${tr}${typeof sumExtra === 'function' && r.transfers.length + (sp.round ? 1 : 0) ? sumExtra(r) : ''}
+  $('#sSum').innerHTML = `<h4>ส่วนของแต่ละคน</h4>${rows}<div class="tot"><span>รวม</span><b>${bahtS(r.total)}</b></div>${discBox(sp.bills, sp.people, 'edit')}${pays}${diff}${tr}${typeof sumExtra === 'function' && (r.transfers.length || sp.round || r.pool) ? sumExtra(r) : ''}
     <p class="note">📒 จดลงรายจ่ายเฉพาะส่วนของเรา <b>${bahtS(mine)}</b> · ที่เหลือเป็น "ค้างกัน" ไม่ทำให้ยอดใช้จ่ายเพี้ยน</p>`;
 }
 
@@ -1033,6 +1035,7 @@ function paintDetail() {
   }).join('') + (bills.length > 1 ? `<div class="di-r tot all"><span>รวมทุกบิล</span><b>${bahtS(toS(s.total))}</b></div>` : '') + discBox(bills, s.people || [], 'detail');
   $('#dShares').innerHTML = (s.people || []).map(p => `<div><span>${esc(who(p))}${eaten[p] && eaten[p].length ? `<small>${eaten[p].join(' · ')}</small>` : ''}</span><b>${bahtS(share[p] || 0)}</b></div>`).join('') +
     `<div class="tot"><span>รวม</span><b>${bahtS(Object.values(share).reduce((x, v) => x + v, 0))}</b></div>`;
+  if (typeof poolDetail === 'function') $('#dItems').insertAdjacentHTML('beforeend', poolDetail(s));
   // การโอน
   const box = $('#dTr');
   box.innerHTML = (s.transfers || []).length ? '' : '<p class="hint">ไม่มีใครต้องโอน (ทุกคนจ่ายส่วนตัวเองแล้ว)</p>';
@@ -1068,6 +1071,7 @@ function paintDetail() {
   const menu = (s.bills || []).filter(b => b.method === 'menu').flatMap(b => (b.items || []).filter(it => it.name || toS(it.price)).map(it => `• ${it.name || 'เมนู'} ${num(toS(it.price))}${toS(it.disc) ? ' ลด ' + num(toS(it.disc)) : ''}${(it.who || []).length && (it.who || []).length < (s.people || []).length ? ' (' + it.who.map(whoMsg).join(', ') + ')' : ''}`));
   const lines = [`${sIc} ${s.title} (${fmtD(s.date)}) รวม ${fromS(toS(s.total)).toLocaleString('th-TH')} บาท`]
     .concat((() => { const all = menu.concat(typeof unitMsgLines === 'function' ? unitMsgLines(s) : []); return all.length ? ['', 'รายการ:'].concat(all) : []; })())
+    .concat(typeof poolMsgLines === 'function' ? poolMsgLines(s) : [])
     .concat(['', 'ส่วนของแต่ละคน:'])
     .concat((s.people || []).map(p => `• ${whoMsg(p)} ${fromS(share[p] || 0).toLocaleString('th-TH')}`))
     .concat((s.transfers || []).length ? ['', 'โอนให้จบ:'].concat(s.transfers.map(t => `• ${whoMsg(t.from)} → ${whoMsg(t.to)} ${Number(t.amount).toLocaleString('th-TH')} บาท`)) : []);
