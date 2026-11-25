@@ -150,7 +150,7 @@ if (window.JK_APP === 'money') {
     dlg.querySelector('#uiBody').innerHTML = `
       <h3>โหมดสี</h3>${seg('theme', [['auto', 'อัตโนมัติ'], ['light', 'กลางวัน'], ['dark', 'กลางคืน']], window.hubTheme ? hubTheme.get() : 'auto')}
       <h3>ขนาดตัวอักษร</h3>${seg('scale', [[1, 'ปกติ'], [1.1, 'ใหญ่'], [1.2, 'ใหญ่มาก']], get('fontScale', 1))}
-      <h3>เลขงานบนไอคอนแอป</h3>${hubBadge.ok ? seg('badge', [['0', 'ปิด'], ['1', 'แสดงเลขงานวันนี้ + เลยกำหนด']], hubBadge.on() ? '1' : '0') + `<p class="ui-note">${hubBadge.on() ? 'ตอนนี้ ' + hubBadge.count() + ' งาน · ' : ''}อัปเดตตอนเปิดแอป · iPhone/iPad ต้องเพิ่มแอปไว้ที่หน้าโฮมและอนุญาตการแจ้งเตือน</p>` : '<p class="ui-note">เครื่อง/เบราว์เซอร์นี้ยังไม่รองรับเลขบนไอคอน (ต้องเพิ่มแอปไว้ที่หน้าโฮมก่อน)</p>'}
+      ${window.JK_APP === 'money' ? '' : `<h3>เลขงานบนไอคอนแอป</h3>${hubBadge.ok ? seg('badge', [['0', 'ปิด'], ['1', 'แสดงเลขงานวันนี้ + เลยกำหนด']], hubBadge.on() ? '1' : '0') + `<p class="ui-note">${hubBadge.on() ? 'ตอนนี้ ' + hubBadge.count() + ' งาน · ' : ''}อัปเดตตอนเปิดแอป · iPhone/iPad ต้องเพิ่มแอปไว้ที่หน้าโฮมและอนุญาตการแจ้งเตือน</p>` : '<p class="ui-note">เครื่อง/เบราว์เซอร์นี้ยังไม่รองรับเลขบนไอคอน (ต้องเพิ่มแอปไว้ที่หน้าโฮมก่อน)</p>'}`}
       <h3>ลายพื้นหลัง</h3>
       <div class="ui-sw" data-k="bg">${BGS.map(([v, l]) => `<button type="button" aria-pressed="${v === hubBg.get()}" data-v="${v}"><i class="pv" data-bg="${v}" data-tint="${hubBg.tint()}"></i><span>${l}</span></button>`).join('')}
         <button type="button" aria-pressed="${hubBg.get() === 'photo'}" data-v="photo"><i class="pv pv-photo" data-bg="${get('bgPhoto', '') ? 'photo' : 'plain'}" data-tint="${hubBg.tint()}">${get('bgPhoto', '') ? '' : ICO.cam}</i><span>รูปของฉัน</span></button></div>

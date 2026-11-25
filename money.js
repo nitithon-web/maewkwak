@@ -56,6 +56,8 @@ function render() {
   $('#vTabs').querySelectorAll('button').forEach(c => c.classList.toggle('on', c.dataset.v === view));
   $('#vTabs').hidden = view === 'owe';
   document.querySelectorAll('#mSec a').forEach(a => { if (a.dataset.s === (view === 'owe' ? 'owe' : 'money')) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  { const h1 = document.querySelector('header h1'); if (h1) h1.textContent = view === 'owe' ? 'ค้างกัน' : 'รายรับ-รายจ่าย'; }
+  document.querySelectorAll('.tabbar a').forEach(a => { const h = a.getAttribute('href'); if (h === (view === 'owe' ? 'money.html#owe' : 'money.html')) a.setAttribute('aria-current', 'page'); else if (/^money\.html/.test(h)) a.removeAttribute('aria-current'); });
   $('#vList').hidden = view !== 'list';
   $('#vCal').hidden = view !== 'cal';
   $('#vChart').hidden = view !== 'chart';
