@@ -63,6 +63,7 @@ async function boot() {
     try { if (location.search && !Q.get('dev')) history.replaceState(history.state, '', location.pathname); } catch (e) {}   // ซ่อนลิงก์ยาว ?liff.state=… (จำค่าไว้ใน Q แล้ว)
     await loadHome();
     if (Q.get('b')) await openBill(Q.get('b'), true);
+    else if (Q.get('p')) await openPool(Q.get('p'), true);
     else if (Q.get('v') === 'new' && home.group) openCreate(null, true);
     else show('home', true);
   } catch (e) { $('#app').innerHTML = `<div class="sec msg">${esc(e.message)}</div>`; }
@@ -108,7 +109,7 @@ function drawHome() {
     ${home.me.ppSet || home.me.qr || home.me.qrImg || home.me.bank ? '' : `<button class="row-btn sec item" type="button" id="setPay"><div class="mid"><div class="nm">ตั้งช่องทางรับเงิน</div><div class="lbl">อัปรูป QR ใส่พร้อมเพย์ หรือเลขบัญชีธนาคาร เพื่อนจะได้จ่ายง่าย</div></div><span class="lnk">ตั้งเลย</span></button>`}`;
   $('#app').querySelectorAll('[data-bill]').forEach(b => b.onclick = () => openBill(b.dataset.bill));
   $('#app').querySelectorAll('[data-pool]').forEach(b => b.onclick = () => openPool(b.dataset.pool));
-  const np = $('#newPool'); if (np) np.onclick = () => { ps = { name: '', each: '', my: '', people: ((home.group && home.group.members) || []).map(m => ({ uid: m.uid, name: m.name, on: false, inS: '' })) }; show({ name: 'poolNew' }); };
+  const np = $('#newPool'); if (np) np.onclick = () => { ps = { name: '', each: '', my: '', equal: true, people: ((home.group && home.group.members) || []).map(m => ({ uid: m.uid, name: m.name, on: false, inS: '' })) }; show({ name: 'poolNew' }); };
   const sp = $('#setPay'); if (sp) sp.onclick = () => openMe();
   foot(home.group ? '<button class="btn ink" type="button" id="newBill">สร้างบิลใหม่ (ฉันจ่ายก่อน)</button>' : '<div class="lbl" style="text-align:center">สร้างบิลได้จากในกลุ่ม: พิมพ์ หาร แล้วกดสร้างบิลใหม่</div>');
   const nb = $('#newBill'); if (nb) nb.onclick = () => openCreate();
@@ -213,14 +214,14 @@ function drawCreate() {
   const mem = cs.people.filter(p => !p.me && !p.out);
   $('#app').innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between"><h1>${cs.edit ? 'แก้บิล' : 'สร้างบิล'}</h1><span class="pill ink">${cs.pool ? '🏦 จ่ายจากกอง' : 'โหมดคนจ่ายก่อน'}</span></div>
-    ${cs.pool ? `<div class="sec" style="padding:10px 14px"><div class="nm">🏦 จ่ายจากกองกลาง "${esc(cs.poolName)}"</div><div class="lbl">ไม่มีใครต้องโอน ระบบจดว่าแต่ละคนใช้เงินกองเท่าไหร่ ไว้คิดตอนปิดกอง</div></div>` : ''}
+    ${cs.pool ? `<div class="sec" style="padding:10px 14px"><div class="nm">🏦 จ่ายจากกองกลาง "${esc(cs.poolName)}"</div><div class="lbl">${cs.poolEq ? 'กองนี้หารเท่ากันทั้งกอง: บิลนี้หารเท่ากันทุกคนในกอง ' + cs.poolN + ' คน' : 'ไม่มีใครต้องโอน ระบบจดว่าแต่ละคนใช้เงินกองเท่าไหร่ ไว้คิดตอนปิดกอง'} · ส่งการ์ดแจ้งในกลุ่มให้เอง</div></div>` : ''}
     <div class="sec" style="padding:12px 14px;display:flex;gap:12px">
       <label class="field" style="flex:1.4"><span class="lbl">ค่าอะไร</span><input id="cTitle" type="text" maxlength="60" placeholder="เช่น ชาบู ค่าคอร์ต" value="${esc(cs.title)}"></label>
       <label class="field" style="flex:1"><span class="lbl">ยอดรวม (บาท)</span><input id="cTotal" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(cs.total)}"></label>
     </div>
     ${catBlock()}
     ${rcptBlock()}
-    <div class="tabs" role="group" aria-label="วิธีหาร">${MODES.map(([k, l]) => `<button type="button" class="tab" data-mode="${k}" aria-pressed="${cs.mode === k}">${l}</button>`).join('')}</div>
+    ${cs.poolEq ? `<div class="sec list" id="people"><div class="item"><div class="mid"><div class="nm">หารเท่ากัน ${cs.poolN} คน</div><div class="lbl">${esc(cs.people.filter(p => p.on).map(p => p.me ? 'ฉัน' : p.name).join(', '))}</div></div><div class="amt" id="eqEach"></div></div></div>` : `<div class="tabs" role="group" aria-label="วิธีหาร">${MODES.map(([k, l]) => `<button type="button" class="tab" data-mode="${k}" aria-pressed="${cs.mode === k}">${l}</button>`).join('')}</div>
     ${cs.mode === 'items' && cs.touched && itemsTotal() && itemsTotal() !== toS(cs.total) ? `<div class="lbl" style="margin:-4px 4px 0">เมนูรวม ${baht(itemsTotal())} ไม่เท่ายอดบิล ส่วนต่าง (ค่าบริการ/ส่วนลด) แบ่งตามสัดส่วนที่แต่ละคนกิน</div>` : ''}
     <div class="lbl" style="margin:-4px 4px 0">${{ equal: 'ทุกคนที่ติ๊กจ่ายเท่ากัน เศษอยู่กับคนจ่ายก่อน', hours: 'กด − + ปรับจำนวนชั่วโมงของแต่ละคน มาน้อยจ่ายน้อย', items: 'ใส่เมนู แล้วแตะชื่อคนที่กินเมนูนั้น เมนูที่กินด้วยกันหารเท่ากัน', custom: 'รู้ยอดของแต่ละคนอยู่แล้ว (เช่น ต่างคนต่างซื้อ) ใส่ยอดของเพื่อนแต่ละคน ที่เหลือเป็นส่วนของคุณ' }[cs.mode]}</div>
     ${cs.mode === 'hours' ? `<label class="lbl" style="display:flex;gap:8px;align-items:center;margin:0 4px"><input type="checkbox" id="selfU" ${cs.selfUnits ? 'checked' : ''} style="width:18px;height:18px"> ให้เพื่อนกดแก้ชั่วโมงของตัวเองได้ (จนกว่าจะมีคนจ่าย)</label>` : ''}
@@ -229,7 +230,7 @@ function drawCreate() {
       ${cs.people.map(personRow).join('')}
       <button type="button" class="row-btn item" id="addOut"><span class="lnk" style="padding:0">+ เพิ่มคนนอกกลุ่ม</span></button>
     </div>
-    ${mem.length ? '<div class="lbl" style="padding:0 4px">ไม่เห็นชื่อใคร ให้คนนั้นแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก หรือเพิ่มเป็นคนนอกกลุ่มไปก่อน</div>' : '<div class="lbl" style="padding:0 4px">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก (พิมพ์ แมวกวัก ในกลุ่มเพื่อเรียกการ์ด) แล้วกลับมาที่หน้านี้ใหม่</div>'}
+    ${mem.length ? '<div class="lbl" style="padding:0 4px">ไม่เห็นชื่อใคร ให้คนนั้นแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก หรือเพิ่มเป็นคนนอกกลุ่มไปก่อน</div>' : '<div class="lbl" style="padding:0 4px">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวัก (พิมพ์ แมวกวัก ในกลุ่มเพื่อเรียกการ์ด) แล้วกลับมาที่หน้านี้ใหม่</div>'}`}
     ${cs.pool ? '' : payBlock()}`;
   bindCreate();
   const su = $('#selfU'); if (su) su.onchange = () => { cs.selfUnits = su.checked; };
@@ -302,10 +303,11 @@ function bindCreate() {
     if (x[1] === 'hours') { cs.mode = 'hours'; cs.unit = x[2]; }
     else if (x[1] === 'items') { cs.mode = 'items'; if (!cs.items.length) { cs.items.push({ name: '', price: '', who: [] }); cs.touched = !!toS(cs.total); } }
     else cs.mode = 'equal';
+    if (cs.poolEq) cs.mode = 'equal';   // กองหารเท่ากันทั้งกอง: เลือกหมวดย่อยได้แค่ชื่อ
     drawCreate();
   });
   $('#rcBtn').onclick = () => readReceipt($('#rcBtn'));
-  $('#addOut').onclick = addOutsider;
+  const ao = $('#addOut'); if (ao) ao.onclick = addOutsider;
   const cp = $('#chgPay'); if (cp) cp.onclick = () => openMe();
   if (cs.mode === 'items') {
     A.querySelectorAll('[data-iname]').forEach(i => i.oninput = () => { cs.items[+i.dataset.iname].name = i.value; });
@@ -330,7 +332,8 @@ function refresh() {
   });
   const others = cs.people.filter(p => p.on && !p.me && p.byUid !== 'me');
   const fl = $('#fl'), fr = $('#fr');
-  if (fl) fl.textContent = others.length + ' คนต้องจ่ายให้คุณ · รวม ' + baht(others.reduce((s, p) => s + (r.amt[p.key] || 0), 0));
+  const ee = $('#eqEach'); if (ee) ee.textContent = r.T ? 'คนละ ' + baht(Math.floor(r.T / Math.max(1, cs.poolN))) : '';
+  if (fl) fl.textContent = cs.pool ? 'จ่ายจากกอง · ' + (others.length + 1) + ' คนใช้ร่วมกัน' : others.length + ' คนต้องจ่ายให้คุณ · รวม ' + baht(others.reduce((s, p) => s + (r.amt[p.key] || 0), 0));
   if (fr) { fr.textContent = !r.T ? 'ใส่ยอดรวม' : r.diff === 0 ? 'ยอดครบ ' + baht(r.T) : r.diff > 0 ? 'ยังขาด ' + baht(r.diff) : 'เกิน ' + baht(-r.diff); fr.style.color = r.T && r.diff === 0 ? 'var(--ok)' : 'var(--bad)'; }
   const s = $('#send'); if (s) s.disabled = !(r.T && r.diff === 0 && others.some(p => (r.amt[p.key] || 0) > 0));
   return r;
@@ -461,12 +464,14 @@ function drawPoolNew() {
       <label class="field" style="flex:1.4"><span class="lbl">ชื่อกอง</span><input id="pName" type="text" maxlength="40" placeholder="เช่น ทริปเขาใหญ่" value="${esc(ps.name)}"></label>
       <label class="field" style="flex:1"><span class="lbl">ลงคนละ (บาท)</span><input id="pEach" class="num" type="text" inputmode="decimal" placeholder="0" value="${esc(ps.each)}"></label>
     </div>
+    <button type="button" class="sec row-btn pl-sw" id="pEq" aria-pressed="${ps.equal}"><span class="sw" aria-hidden="true"></span><span class="mid"><span class="nm">หารเท่ากันทั้งกอง</span><span class="lbl">${ps.equal ? 'ไปด้วยกันทุกที่ ทุกบิลหารเท่ากันทุกคนในกอง เหลือคืนตามที่ลง ขาดเติมเท่ากัน' : 'ปิดอยู่: แต่ละบิลเลือกคนและวิธีหารเองได้ (เช่น มีคนไม่ได้กินบางมื้อ)'}</span></span></button>
     <div class="sec list">
       <div class="item"><div class="mid"><div class="nm">${esc(home.me.disp || 'ฉัน')} (ฉัน)</div><div class="lbl">ถือเงินกอง · ส่วนที่ฉันลงเอง</div></div><input class="amt-in num" data-pmy inputmode="decimal" placeholder="0" value="${esc(ps.my)}"></div>
       ${ps.people.map((p, i) => `<div class="item ${p.on ? '' : 'dim'}"><button type="button" class="chk" data-pon="${i}" aria-pressed="${p.on}" aria-label="${esc(p.name)} ลงกอง">${p.on ? '✓' : ''}</button><div class="mid"><div class="nm">${esc(p.name)}</div></div>${p.on ? `<input class="amt-in num" data-pin="${i}" inputmode="decimal" placeholder="0" value="${esc(p.inS)}">` : ''}</div>`).join('') || '<div class="empty">ยังไม่มีชื่อเพื่อนในกลุ่ม ให้เพื่อนแตะ "✋ ฉันอยู่ในกลุ่มนี้" ในการ์ดของแมวกวักก่อน</div>'}
     </div>`;
   const A = $('#app');
   $('#pName').oninput = e => { ps.name = e.target.value; };
+  $('#pEq').onclick = () => { ps.equal = !ps.equal; drawPoolNew(); };
   $('#pEach').oninput = e => { ps.each = e.target.value; ps.my = ps.each; ps.people.forEach(p => { if (p.on) p.inS = ps.each; }); A.querySelectorAll('[data-pin]').forEach(i => { i.value = ps.each; }); A.querySelector('[data-pmy]').value = ps.each; sumFoot(); };
   A.querySelector('[data-pmy]').oninput = e => { ps.my = e.target.value; sumFoot(); };
   A.querySelectorAll('[data-pon]').forEach(b => b.onclick = () => { const p = ps.people[+b.dataset.pon]; p.on = !p.on; if (p.on && !p.inS) p.inS = ps.each; drawPoolNew(); });
@@ -479,7 +484,7 @@ function drawPoolNew() {
     if (!members.length) { toast('แตะเลือกเพื่อนที่ลงกองอย่างน้อย 1 คน'); return; }
     const b = $('#pGo'); busy(b, true);
     try {
-      const d = await call('hk_pool_new', { name: ps.name.trim(), myInS: toS(ps.my), members: members });
+      const d = await call('hk_pool_new', { name: ps.name.trim(), myInS: toS(ps.my), members: members, equal: ps.equal });
       const sent = d.msg ? await postToChat(d.msg) : true;
       toast(sent ? 'สร้างกองแล้ว ส่งบิลลงกองเข้ากลุ่มแล้ว' : 'สร้างกองแล้ว');
       await loadHome();
@@ -487,10 +492,27 @@ function drawPoolNew() {
     } catch (e) { toast(e.message); busy(b, false); }
   };
 }
-async function openPool(id) {
+/** แดชบอร์ดกองกลาง: หลอดใช้ไป/ลงกอง + ใช้ตามหมวด + ใช้รายวัน (คิดจากบิลที่จ่ายจากกอง) */
+function poolDash(P) {
+  const pct = P.inS > 0 ? Math.min(100, Math.round(P.spentS * 100 / P.inS)) : (P.spentS ? 100 : 0), over = P.leftS < 0;
+  const n = P.rows.length || 1;
+  const bar = (label, v, max, ic) => `<div class="pl-bar"><div class="pl-bl"><span>${ic ? ic + ' ' : ''}${esc(label)}</span><span class="num">${baht(v)}</span></div><div class="pl-tr"><i style="width:${max ? Math.max(3, Math.round(v * 100 / max)) : 0}%"></i></div></div>`;
+  const by = (key) => { const m = {}; P.bills.forEach(b => { const k = key(b); m[k] = (m[k] || 0) + b.totalS; }); return Object.entries(m); };
+  const cats = by(b => b.cat || '').sort((a, b) => b[1] - a[1]);
+  const days = by(b => b.date).sort((a, b) => a[0] < b[0] ? -1 : 1);
+  const cMax = Math.max(0, ...cats.map(x => x[1])), dMax = Math.max(0, ...days.map(x => x[1]));
+  return `<div class="sec pl-dash">
+      <div class="pl-bl"><span class="lbl">ใช้ไปแล้ว ${pct}%</span><span class="lbl">${over ? 'ใช้เกินกอง ' + baht(-P.leftS) : 'เฉลี่ยคนละ ' + baht(Math.round(P.spentS / n))}</span></div>
+      <div class="pl-tr big ${over ? 'over' : ''}" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="ใช้เงินกองไป ${pct}%"><i style="width:${Math.max(pct, P.spentS ? 2 : 0)}%"></i></div>
+      ${P.planS > P.inS ? `<div class="lbl">ยังไม่โอนลงกอง ${baht(P.planS - P.inS)}</div>` : ''}
+    </div>
+    ${cats.length ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใช้ไปกับอะไร</div>${cats.map(([k, v]) => { const c = catOf(k); return bar(c ? c[2] : 'อื่นๆ', v, cMax, c ? c[1] : '🧾'); }).join('')}</div>` : ''}
+    ${days.length > 1 ? `<div class="sec pl-dash"><div class="sec-h" style="padding:0 0 4px">ใช้รายวัน</div>${days.map(([d, v]) => bar(thDate(d), v, dMax)).join('')}</div>` : ''}`;
+}
+async function openPool(id, root) {
   $('#app').innerHTML = '<div class="msg"><div class="spin" role="status" aria-label="กำลังโหลด"></div></div>';
-  try { const d = await call('hk_pool', { p: id }); show({ name: 'pool', pool: d.pool }); }
-  catch (e) { toast(e.message); draw(); }
+  try { const d = await call('hk_pool', { p: id }); show({ name: 'pool', pool: d.pool }, root); }
+  catch (e) { toast(e.message); if (root) show('home', true); else draw(); }
 }
 function drawPool() {
   const P = view.pool, open = P.status === 'open';
@@ -504,8 +526,9 @@ function drawPool() {
       <div class="sec"><div class="lbl">ลงกองแล้ว</div><div class="big">${baht(P.inS)}</div><div class="lbl">ใช้ไป ${baht(P.spentS)}</div></div>
       <div class="dark"><div class="lbl">${P.leftS >= 0 ? 'เงินกองเหลือ' : 'กองขาด'}</div><div class="big">${baht(Math.abs(P.leftS))}</div><div class="lbl">${P.bills.length} บิลจากกอง</div></div>
     </div>
-    <div class="sec list"><div class="sec-h">แต่ละคน (ลง − ใช้)</div>${P.rows.map(row).join('')}</div>
-    <div class="sec list"><div class="sec-h">บิลที่จ่ายจากกอง</div>${P.bills.map(b => `<div class="item"><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))}</div></div><div class="amt">${baht(b.totalS)}</div></div>`).join('') || '<div class="empty">ยังไม่มีบิลที่จ่ายจากกอง</div>'}</div>
+    ${poolDash(P)}
+    <div class="sec list"><div class="sec-h">แต่ละคน (ลง − ใช้)${P.equal ? ' · หารเท่ากันทั้งกอง' : ''}</div>${P.rows.map(row).join('')}</div>
+    <div class="sec list"><div class="sec-h">บิลที่จ่ายจากกอง</div>${P.bills.map(b => { const c = catOf(b.cat); return `<div class="item"><span class="pl-ic" aria-hidden="true">${c ? c[1] : '🧾'}</span><div class="mid"><div class="nm">${esc(b.title)}</div><div class="lbl">${esc(thDate(b.date))}${c ? ' · ' + esc(c[2]) : ''}</div></div><div class="amt">${baht(b.totalS)}</div></div>`; }).join('') || '<div class="empty">ยังไม่มีบิลที่จ่ายจากกอง</div>'}</div>
     ${!open && P.refunds.length ? `<div class="sec list"><div class="sec-h">คืนเงินจากกอง</div>${P.refunds.map(r => `<div class="item"><div class="mid"><div class="nm">${esc(P.holder)} คืน ${esc(r.name)}</div></div><span class="num h">${baht(r.amtS)}</span>${P.isHolder ? `<button type="button" class="btn sm ${r.done ? '' : 'ink'}" data-rf="${esc(r.k)}" data-done="${r.done ? 1 : ''}">${r.done ? 'คืนแล้ว ✓' : 'คืนแล้ว'}</button>` : `<span class="pill ${r.done ? 'ok' : 'soft'}">${r.done ? 'ได้คืนแล้ว' : 'รอคืน'}</span>`}</div>`).join('')}</div>` : ''}
     <div class="lbl" style="padding:0 4px">${open ? 'ปิดกองเมื่อจบทริป: คนที่ใช้เกินจะได้บิล "เติมกอง" ส่วนคนที่เหลือ คนถือกองคืนให้ คนที่ยังไม่โอนลงกอง คิดรวมในยอดเติมให้เลย' : 'ปิดกองแล้ว ยอดเติมกองอยู่ในบิล "เติมกอง" ในหน้าแรก'}</div>`;
   const A = $('#app');
@@ -519,7 +542,10 @@ function drawPool() {
       openCreate();
       cs.pool = P.id; cs.poolName = P.name; cs.cat = 'trip';
       const inPool = new Set(P.members.map(m => m.uid));
-      cs.people.forEach(p => { if (!p.me) p.on = inPool.has(p.uid); });
+      cs.people = cs.people.filter(p => p.me || inPool.has(p.uid));   // คนนอกกองไม่ใช้เงินกอง
+      cs.people.forEach(p => { p.on = true; });
+      cs.poolEq = !!P.equal; cs.poolN = cs.people.length;
+      if (cs.poolEq) cs.mode = 'equal';
       drawCreate();
     };
     $('#pClose').onclick = async () => {

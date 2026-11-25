@@ -92,12 +92,28 @@
     .spin { width: 22px; height: 22px; border: 2.5px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: sp .8s linear infinite; margin: 0 auto; }
     @keyframes sp { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+    /* 🏦 กองกลางในเว็บ: สวิตช์ + แดชบอร์ด */
+    .pl-sw{display:flex;gap:12px;align-items:flex-start;text-align:left;padding:12px 14px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;font:inherit;color:inherit}
+    .pl-sw .mid{display:flex;flex-direction:column;gap:2px}
+    .pl-sw .sw{flex:none;width:40px;height:24px;border-radius:12px;background:var(--line,#d6d9d3);position:relative;margin-top:2px;transition:background .15s}
+    .pl-sw .sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s}
+    .pl-sw[aria-pressed="true"] .sw{background:var(--ink,#1c1f1c)}
+    .pl-sw[aria-pressed="true"] .sw::after{transform:translateX(16px)}
+    .pl-dash{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+    .pl-bl{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+    .pl-tr{height:6px;border-radius:3px;background:var(--line,#e6e8e3);overflow:hidden}
+    .pl-tr.big{height:10px;border-radius:5px}
+    .pl-tr i{display:block;height:100%;background:var(--ink,#1c1f1c);border-radius:inherit}
+    .pl-tr.over i{background:var(--bad,#8a4b1f)}
+    .pl-bar{display:flex;flex-direction:column;gap:4px}
+    .pl-ic{flex:none;width:28px;text-align:center;font-size:18px}
+    @media (prefers-reduced-motion: reduce){.pl-sw .sw,.pl-sw .sw::after{transition:none}}
   </style>
 </head>
 <body>
   <header class="top">
     <button class="ib hide" id="back" type="button" aria-label="ย้อนกลับ"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
-    <div class="t"><img src="jod.png?v=117" alt=""><span id="ttl">หารกัน</span></div>
+    <div class="t"><img src="jod.png?v=118" alt=""><span id="ttl">หารกัน</span></div>
     <button class="ib" id="meBtn" type="button" aria-label="ชื่อและช่องทางรับเงินของฉัน"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></button>
   </header>
   <main id="app"><div class="msg"><div class="spin" role="status" aria-label="กำลังโหลด"></div></div></main>
@@ -105,7 +121,7 @@
   <dialog id="dlg"><div class="in" id="dlgIn"></div></dialog>
   <input type="file" id="file" accept="image/*" class="sr" tabindex="-1" aria-hidden="true">
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <script src="qrcode.js?v=117"></script>
-  <script src="hk.js?v=117"></script>
+  <script src="qrcode.js?v=118"></script>
+  <script src="hk.js?v=118"></script>
 </body>
 </html>
