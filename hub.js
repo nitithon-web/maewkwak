@@ -3,10 +3,9 @@
  * 2) หน้างาน: แถบ ☀️ วันนี้ (งานวันนี้/เลยกำหนด · งานประชุมใกล้กำหนด · บิลรอเบิก · ใช้จ่ายวันนี้)
  * 3) หน้างาน: ค้นหาข้ามหมวด (กล่องฝาก · บิลเบิก · รายรับรายจ่าย) ใต้ผลค้นหางาน
  * อ่านจากข้อมูลที่เก็บในเครื่องของแต่ละหน้า (localStorage) · หน้างานดึงบิล/เงินมาเก็บไว้ให้ถ้าเครื่องนี้ยังไม่เคยเปิด */
-/* 💰 แยก 2 แอป: หน้าใต้ /ngoen/ = แอปเงิน (หลังบ้านของ nitithon.see) · ที่เหลือ = จดครบ (งาน, pm01)
- * แอปเงินเก็บลิงก์ส่วนตัว/กล่องรอส่งแยกชื่อ (m:cfg …) ไม่ปนกับแอปงานที่อยู่โดเมนเดียวกัน */
+/* 🐱 แมวกวัก: หลังบ้าน = Apps Script แมวกวัก (nitithon.see) · ลิงก์ส่วนตัว/กล่องรอส่งเก็บชื่อ m:… */
 window.JK_MONEY_API = 'https://script.google.com/macros/s/AKfycbwzD8Bffxcrd4Md_RgM-XcxiBWssGCvqV3zasNlXL-UR1Ulet2XySmBAz5MV6iERtJA/exec';
-window.JK_APP = /\/ngoen\/|maewkwak/i.test(location.hostname + location.pathname) ? 'money' : 'work';
+window.JK_APP = 'money';
 if (window.JK_APP === 'money') {
   window.JK_DEFAULT_URL = window.JK_MONEY_API;
   const NS = { cfg: 1, hubOutbox: 1, hubOutboxFail: 1, vaultSpace: 1 };
@@ -452,7 +451,7 @@ if (window.JK_APP === 'money') {
   if (!document.body.classList.contains('tasks')) return;
   const cfg = get('cfg', {});
   const api = async (action) => {
-    const res = await fetch(cfg.url || 'https://script.google.com/macros/s/AKfycbwaM09cNIMYY1_HMRTEL0Sm-3qg5rSvxd93k6jLU2EgoaHNZvMUvhgoQ_jRnELgY0FAbA/exec', { method: 'POST', body: JSON.stringify({ action, key: cfg.key }), redirect: 'follow' });
+    const res = await fetch(cfg.url || window.JK_MONEY_API, { method: 'POST', body: JSON.stringify({ action, key: cfg.key }), redirect: 'follow' });
     const d = await res.json(); if (!d.ok) throw new Error(d.error || 'error'); return d;
   };
 

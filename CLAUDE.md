@@ -1,23 +1,41 @@
 # แมวกวัก (แอปเงิน) — คู่มือสำหรับ Claude
 
-แอปเงินส่วนตัวของคุณนิติธร สีดำ แยกออกมาจาก "จดครบ" (รีโป `tibdglobal/jodngan`) เมื่อ 25 พ.ย. 2569
+แอปเงินส่วนตัวของคุณนิติธร สีดำ (เริ่มแยกจาก "จดครบ" เมื่อ 25 พ.ย. 2569 · ตอนนี้เป็นระบบของตัวเอง ไม่มีโค้ดหรือการเชื่อมต่อกับจดครบแล้ว)
 คุยกับเจ้าของเป็น **ภาษาไทย** เสมอ · รีโปนี้ **เปิดสาธารณะ** ห้ามใส่ token / key / เลขบัญชี / เลขพร้อมเพย์ / ข้อมูลส่วนตัวลงไฟล์
+ในแอปและข้อความ LINE ไม่พูดถึงจดครบ/EZP BOT
 
 | ส่วน | อยู่ที่ไหน |
 |---|---|
 | หน้าเว็บ (PWA) | รีโปนี้ → GitHub Pages `https://nitithon-web.github.io/maewkwak/` |
-| หลังบ้าน | Apps Script โปรเจกต์ **"แมวกวัก"** บัญชี nitithon.see@gmail.com (ROLE=money) · deployment `AKfycbwzD8Bffxcrd4Md…` (ห้ามสร้าง deployment ใหม่ ใช้ "เวอร์ชันใหม่" ของอันเดิม) |
-| โค้ดหลังบ้าน | **ต้นฉบับอยู่ที่ `tibdglobal/jodngan` โฟลเดอร์ `apps-script/`** (โค้ดชุดเดียวกับระบบงาน ต่างกันที่ Script Property `ROLE`) · ในโปรเจกต์แมวกวักรวมทุกไฟล์เป็น `รหัส.gs` ไฟล์เดียว (Code Bills Money Inbox Owe Ai Meet Mail Group Split ตามลำดับ) |
+| หลังบ้าน | Apps Script โปรเจกต์ **"แมวกวัก"** บัญชี nitithon.see@gmail.com · deployment `AKfycbwzD8Bffxcrd4Md…` (ห้ามสร้าง deployment ใหม่ ใช้ "เวอร์ชันใหม่" ของอันเดิม) |
+| โค้ดหลังบ้าน | **`apps-script/` ในรีโปนี้คือต้นฉบับ** · ในโปรเจกต์ Apps Script รวมเป็น `รหัส.gs` ไฟล์เดียว ตามลำดับ `Code Slip Money Chat Owe Ai Group Line` |
 | ฐานข้อมูล | Google Sheet "จดครบ เงิน" (nitithon.see) แท็บ `Money` `Owe` `Group` `HkUsers` `Vault2` `AiSamples` |
 | LINE | OA **แมวกวัก** `@912spdex` (Messaging API channel 2012792290, provider PM) webhook = deployment ข้างบน · แอปเล็ก LIFF `2012774388-IyXrJ3Zn` endpoint `hk.html` |
 
-## ไฟล์
-- `money.html` `split.html` `vault.html` (ตู้รหัสส่วนตัวเท่านั้น) · `index.html` → money.html
-- `hub.js` `style.css` `mcore.js` `money.js` `owe.js` `vault.js` `qrcode.js` — **คัดลอกจาก `tibdglobal/jodngan`** แก้ที่นั่นก่อนแล้วคัดลอกมา (hub.js รู้ว่าเป็นแอปเงินจากชื่อ `maewkwak` ใน URL → `window.JK_APP = 'money'` + `JK_MONEY_API`)
-- `hk.html` `hk.js` + `jod*.png` — แอปเล็กหารในกลุ่ม LINE
+## หน้าเว็บ
+- `money.html` (รายรับรายจ่าย + `#owe` ค้างกัน) `split.html` (หารกัน) `vault.html` (ตู้รหัสส่วนตัว ตู้เดียว) · `index.html` → money.html
+- `hub.js` ป้ายซิงก์ กล่องรอส่ง ตั้งค่า ไมค์ · เก็บลิงก์ส่วนตัวที่ LS `m:cfg` · เครื่องที่ยังไม่มี key หรือ key เก่า ขึ้นหน้าต่างเชื่อมเครื่อง `hubConnect` (ปุ่มขอลิงก์ในแชท / วางลิงก์ — iPhone ที่เปิดจากไอคอนหน้าจอโฮมเก็บข้อมูลแยกจาก LINE)
+- `mcore.js` `money.js` `owe.js` `vault.js` `qrcode.js` `style.css` — ของรีโปนี้เอง (แก้ที่นี่)
+- `hk.html` `hk.js` + `jod*.png` — แอปเล็กหารในกลุ่ม LINE (ไม่โหลด hub.js)
 - `sw.js` (CACHE `ngoen-vNN`) · `manifest.json`
+
+## หลังบ้าน (`apps-script/`)
+- `Code.gs` — `doPost`: รับเฉพาะคำสั่งใน `MONEY_ACTIONS` (money_* owe_* vault_* hk_setup ai_* status backup_now) + `hk_*` ของแอปเล็ก (ยืนยันด้วย ID token ของ LINE) + LINE webhook · `checkReminders` (ทุก 15 นาที: เตือนหารในกลุ่ม + สำรองชีต) · `morningSummary` = `moneyMorning_` · ตู้รหัส `vs_()` = แท็บ `Vault2`
+- `Slip.gs` — รูปสลิป/ใบเสร็จจาก LINE → โฟลเดอร์ รอจัด → ปุ่ม 💸 จ่าย / 💰 รับ / 💵 คืนจาก… / 🗑
+- `Money.gs` — รายรับรายจ่าย หมวด งบ รายการประจำ เป้าออม (`MONEY_CFG`)
+- `Chat.gs` — จดเงินจากข้อความ (`saveAs_`) + ปุ่ม ↔ รับ/จ่าย
+- `Owe.gs` — ค้างกัน · `Group.gs` — หารในกลุ่ม LINE + API แอปเล็ก `hk_*` · `Line.gs` — คำสั่งพิมพ์ใน OA (`moneyLineText_`, `MONEY_HELP`) + สรุปเช้า
+- `Ai.gs` — Gemini อ่านใบเสร็จ/สลิป/เสียง · ชุดใบตัวอย่าง `ai_flag` / `ai_regress` (แก้ prompt/รุ่น AI ให้รัน ai_regress ก่อนและหลัง)
 
 ## อัปขึ้นระบบ
 - หน้าเว็บ: เพิ่ม `?v=NN` ทุกไฟล์ html + `CACHE` ใน sw.js → commit + push `main`
-- หลังบ้าน: แก้ใน `tibdglobal/jodngan/apps-script/` → รวมไฟล์ → วางทับ `รหัส.gs` ในโปรเจกต์แมวกวัก (Chrome ล็อกอิน `/u/3/` = nitithon.see) → บันทึก → การทำให้ใช้งานได้ → จัดการ → ✏️ → เวอร์ชันใหม่
-- ค่าลับ (`LINE_TOKEN`, `GEMINI_API_KEY`, `API_KEY`, `PEER_KEY`) อยู่ใน Script Properties เท่านั้น เจ้าของใส่เอง
+- หลังบ้าน: แก้ `apps-script/*.gs` → เพิ่ม `BACKEND_VER` → รวมไฟล์ตามลำดับข้างบน → วางทับ `รหัส.gs` ในโปรเจกต์แมวกวัก (Chrome ล็อกอิน `/u/3/` = nitithon.see) → บันทึก → การทำให้ใช้งานได้ → จัดการ → ✏️ → เวอร์ชันใหม่
+- ค่าลับ (`LINE_TOKEN`, `GEMINI_API_KEY`, `API_KEY`) อยู่ใน Script Properties เท่านั้น เจ้าของใส่เอง
+
+## ทดสอบ
+- `node --check` ทุกไฟล์ js · รวม `apps-script/*.gs` เป็นไฟล์เดียวแล้ว `node --check`
+- หน้าเว็บ: Playwright เปิดไฟล์ในเครื่อง ขนาดจอ 390×844 · ตั้ง LS `m:cfg` = `{key:'k', url:'https://x.test/exec'}` แล้ว mock คำขอ
+
+## หลักบัญชี
+- ให้ยืม / รับคืน **ไม่นับ** เป็นรายจ่าย/รายรับ · หารกัน → จดรายจ่ายเฉพาะส่วนของเรา ที่เหลือเป็นค้างกัน
+- "ไม่ทวงแล้ว" → ยอดที่เหลือเป็นรายจ่าย (หมวด อื่นๆ) · LINE: ข้อความที่มียอดเงินแต่ไม่บอกจ่าย/รับ (เช่น `ข้าว 60`) = รายจ่าย
