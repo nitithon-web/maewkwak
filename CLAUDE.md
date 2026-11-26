@@ -36,7 +36,7 @@
   · กองแบบ `equal` (สวิตช์ "หารเท่ากันทั้งกอง"): หลังบ้านบังคับหารเท่ากันทุกคนในกอง (`poolEqualSplit_`, เศษอยู่กับคนถือกอง) · เช็กคนจาก `pool.members` ไม่ใช่รายชื่อกลุ่ม
   · **เจ้าของตัดสิน: ในกลุ่มโชว์แค่ยอดรวม** (`poolFlex_`: หลอดใช้ไป/เหลือ + ปุ่มเปิด `hk.html?p=<id>`) · **ในเว็บคนในกองเห็นยอดทุกคน** (ความยุติธรรม) · คนนอกกองดูไม่ได้ (`poolIn_`) · พิมพ์ `กองกลาง` ในกลุ่ม = การ์ดของกองที่เปิดอยู่ · หน้ากองมีแดชบอร์ด `poolDash` (ใช้ตามหมวด/รายวัน) + สถานะเติม/คืนหลังปิด
 - 📊 ตั้งค่า → สถานะระบบและโควตา (`hubStatus` ใน hub.js, เฉพาะแอปเงิน): `status` = `statusInfo_` + `statusQuota_` (โควตา LINE, AI วันนี้, Drive, ขนาดชีต, Script Properties, ตั้งค่ากลุ่ม 9000, รอบเตือน/สำรอง)
-- `sw.js` (CACHE `ngoen-vNN`) · `manifest.json`
+- `sw.js` (CACHE `ngoen-vNN`, เน็ตก่อนแต่ช้าเกิน 3 วิใช้ไฟล์ในเครื่องไปก่อน) · `manifest.json`
 
 ## หลังบ้าน (`apps-script/`)
 - `Code.gs` — `doPost`: รับเฉพาะคำสั่งใน `MONEY_ACTIONS` (money_* owe_* vault_* hk_setup ai_* status backup_now) + `hk_*` ของแอปเล็ก (ยืนยันด้วย ID token ของ LINE) + LINE webhook · `checkReminders` (ทุก 15 นาที: เตือนหารในกลุ่ม + สำรองชีต) · `morningSummary` = `moneyMorning_` · ตู้รหัส `vs_()` = แท็บ `Vault2`
