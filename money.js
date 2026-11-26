@@ -621,13 +621,20 @@ $('#vTabs').querySelectorAll('button').forEach(c => c.onclick = () => { view = c
 function secFromHash() {
   const h = location.hash.slice(1);
   if (h === 'owe') view = 'owe';
-  else if (h === 'money' && view === 'owe') view = 'list';
+  else if ((h === 'money' || h === '') && view === 'owe') view = 'list';   // เปิด money.html (ไม่มี #owe) = หน้าเงินเสมอ แม้ครั้งก่อนอยู่หน้าค้างกัน
   else return false;
   LS.set('moneyView', view);
   return true;
 }
 secFromHash();
 window.addEventListener('hashchange', () => { if (secFromHash()) render(); });
+// แถบล่าง: อยู่หน้านี้แล้วกด เงิน / ค้างกัน = สลับในหน้าเลย ไม่โหลดใหม่
+document.querySelectorAll('.tabbar a[href="money.html"], .tabbar a[href="money.html#owe"]').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  const owe = a.getAttribute('href').endsWith('#owe');
+  history.replaceState(null, '', location.pathname + location.search.replace(/[?&]fix=\d+/, '') + (owe ? '#owe' : ''));
+  view = owe ? 'owe' : (view === 'owe' ? 'list' : view); LS.set('moneyView', view); render(); window.scrollTo(0, 0);
+}));
 document.querySelectorAll('#mSec a[href^="money.html#"]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); history.replaceState(null, '', '#' + a.dataset.s); secFromHash(); render(); }));
 $('#btnSync').onclick = sync;
 render();
