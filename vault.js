@@ -761,7 +761,7 @@ if (!window.crypto || !crypto.subtle) {
 } else {
   load();
 }
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+/* sw ลงทะเบียนใน hub.js (hubSw) */
 
 
 /* ---------- 💾 ไฟล์สำรอง (ข้อมูลที่เข้ารหัสแล้วจากเซิร์ฟเวอร์ ไม่ถอดรหัสออกมา) ---------- */

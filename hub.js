@@ -18,8 +18,48 @@ if (window.JK_APP === 'money') {
     if (c.key && c.url !== window.JK_MONEY_API) localStorage.setItem('cfg', JSON.stringify({ url: window.JK_MONEY_API, key: c.key }));
     window.JK_NOKEY = !c.key && !m;
   } catch (e) {}
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) hubSw();
 }
+
+/* ===================== 🛟 ไฟล์ในเครื่อง: อัปเดตเป็นชุด + ซ่อมตัวเอง =====================
+ * sw.js เปิดจากเครื่องทันที · มีเวอร์ชันใหม่ (ติดตั้งครบชุดแล้ว) → แถบ "มีเวอร์ชันใหม่" แตะแล้วสลับ + โหลดใหม่
+ * ซ่อมตัวเอง: หน้าที่ขึ้นไม่ใช่หน้าที่กด (ไฟล์ในเครื่องผิดชุด) → ล้างไฟล์ในเครื่อง + โหลดสดจากเน็ต (ครั้งเดียวต่อ 1 นาที) */
+function hubSw() {
+  const SW = navigator.serviceWorker;
+  const show = reg => {
+    if (!reg.waiting || document.getElementById('swNew')) return;
+    const b = document.createElement('button');
+    b.id = 'swNew'; b.type = 'button'; b.className = 'sw-new'; b.textContent = '✨ มีเวอร์ชันใหม่ แตะเพื่ออัปเดต';
+    b.onclick = () => { b.textContent = 'กำลังอัปเดต…'; reg.waiting.postMessage('skip'); };
+    (document.body ? Promise.resolve() : new Promise(r => document.addEventListener('DOMContentLoaded', r))).then(() => document.body.appendChild(b));
+  };
+  let reloading = false;
+  SW.addEventListener('controllerchange', () => { if (!reloading && document.getElementById('swNew')) { reloading = true; location.reload(); } });
+  SW.register('sw.js').then(reg => {
+    show(reg);
+    reg.addEventListener('updatefound', () => { const w = reg.installing; if (w) w.addEventListener('statechange', () => { if (w.state === 'installed' && SW.controller) show(reg); }); });
+    const chk = () => reg.update().catch(() => {});
+    chk(); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') chk(); });
+  }).catch(() => {});
+}
+window.hubHeal = async function (why) {
+  try {
+    const last = Number(sessionStorage.getItem('m:heal') || 0);
+    if (Date.now() - last < 60000) return;   // กันวนซ้ำ
+    sessionStorage.setItem('m:heal', String(Date.now()));
+    if (window.caches) await Promise.all((await caches.keys()).filter(k => k.startsWith('ngoen-')).map(k => caches.delete(k)));
+    if (navigator.serviceWorker) await Promise.all((await navigator.serviceWorker.getRegistrations()).map(r => r.unregister()));
+  } catch (e) {}
+  location.replace(location.pathname + '?fix=' + Date.now() + location.hash);
+};
+document.addEventListener('DOMContentLoaded', () => {
+  const page = (location.pathname.split('/').pop() || 'money.html').replace(/\?.*$/, '');
+  const need = { 'money.html': 'money.js', 'split.html': 'scat.js', 'vault.html': 'vault.js' }[page];
+  if (!need) return;
+  const ok = [...document.scripts].some(sc => (sc.getAttribute('src') || '').split('?')[0] === need);
+  if (!ok) window.hubHeal(page);   // เปิด money.html แต่ได้หน้าอื่น = ไฟล์ในเครื่องผิด → ซ่อม
+  else if (/[?&]fix=/.test(location.search)) history.replaceState(null, '', location.pathname + location.hash);
+});
 
 (() => {
   const get = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
