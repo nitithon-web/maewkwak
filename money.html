@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@500;600;700&family=IBM+Plex+Sans+Thai+Looped:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=125">
+  <link rel="stylesheet" href="style.css?v=126">
 </head>
 <body class="money">
   <header class="top">
@@ -48,8 +48,13 @@
     </div>
   </section>
 
-  <!-- จด: ประเภท วันที่ ยอด หมวด สลิป อยู่ในกล่องเดียว -->
-  <section class="mo-comp">
+  <!-- ต้องจัดการ: รายการประจำที่ใกล้ถึงกำหนด -->
+  <section id="todo" class="s-card mo-todo" hidden></section>
+
+  <!-- จด: แผ่นที่เลื่อนขึ้นเมื่อกดปุ่มกลางแถบล่าง (ประเภท วันที่ ยอด หมวด สลิป) -->
+  <div id="jodBack" class="jod-back" hidden></div>
+  <section class="mo-comp" id="jodSheet" role="dialog" aria-modal="true" aria-labelledby="jodTitle">
+    <div class="jod-h"><span class="jod-grip" aria-hidden="true"></span><h2 id="jodTitle">จดเงิน</h2><button type="button" id="jodClose" class="ghost">ปิด</button></div>
     <div class="mo-comp-top">
       <div class="seg mo-type" id="qType"><button type="button" data-v="out">จ่าย</button><button type="button" data-v="in">รับ</button></div>
       <div class="mo-date" id="qDateRow">
@@ -72,10 +77,12 @@
     <button class="chip" data-v="list">รายการ</button>
     <button class="chip" data-v="cal">ปฏิทิน</button>
     <button class="chip" data-v="chart">สรุป</button>
+    <button class="chip" data-v="save">ออม</button>
   </nav>
   <main id="vList"></main>
   <section id="vCal" hidden></section>
   <section id="vChart" hidden></section>
+  <section id="vSave" hidden></section>
   <section id="vOwe" hidden>
     <div class="ow-hero">
       <button type="button" class="ow-k" id="owTheyBox"><small>คนอื่นค้างเรา</small><b id="owThey" class="in">฿0</b></button>
@@ -210,16 +217,17 @@
   <input type="file" id="mFile" accept="image/*,application/pdf" multiple hidden>
 
   <nav class="tabbar" aria-label="ส่วนของแอปเงิน">
-    <a href="money.html" aria-current="page"><span aria-hidden="true">💰</span>เงิน</a>
-    <a href="split.html"><span aria-hidden="true">🍜</span>หาร</a>
     <a href="money.html#owe"><span aria-hidden="true">🤝</span>ค้างกัน</a>
+    <a href="split.html"><span aria-hidden="true">🍜</span>หาร</a>
+    <a href="money.html#jod" class="tb-jod" aria-label="จดเงิน"><span aria-hidden="true">＋</span>จด</a>
+    <a href="money.html" aria-current="page"><span aria-hidden="true">💰</span>เงิน</a>
     <a href="vault.html"><span aria-hidden="true">🔐</span>รหัส</a>
   </nav>
 
-  <script src="hub.js?v=125"></script>
-  <script src="mcore.js?v=125"></script>
-  <script src="money.js?v=125"></script>
-  <script src="qrcode.js?v=125"></script>
-  <script src="owe.js?v=125"></script>
+  <script src="hub.js?v=126"></script>
+  <script src="mcore.js?v=126"></script>
+  <script src="money.js?v=126"></script>
+  <script src="qrcode.js?v=126"></script>
+  <script src="owe.js?v=126"></script>
 </body>
 </html>

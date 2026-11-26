@@ -637,7 +637,7 @@ body.money .m-bar { margin-bottom: 10px; }
 .mo-comp :focus-visible, .mo-hero :focus-visible, #vTabs :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* มุมมอง */
-#vTabs.mo-tabs { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 0 6px; padding: 3px; background: var(--line); border: 0; border-radius: 12px; }
+#vTabs.mo-tabs { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0 0 6px; padding: 3px; background: var(--line); border: 0; border-radius: 12px; }
 #vTabs.mo-tabs button { border: 0; border-radius: 9px; padding: 7px 4px; background: transparent; color: var(--muted); font-size: calc(14px * var(--fs, 1)); }
 #vTabs.mo-tabs button.on { background: var(--card); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 
@@ -2420,3 +2420,58 @@ dialog label.pl-r { display: flex; align-items: center; justify-content: space-b
 .st-mute { font-size: calc(12.5px * var(--fs, 1)); color: var(--mute, #666); margin: 0; }
 /* ✨ แถบมีเวอร์ชันใหม่ (hubSw) */
 .sw-new { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 60; border: 0; border-radius: 999px; padding: 10px 18px; background: var(--ink, #1c1f1c); color: var(--paper, #fff); font: inherit; font-size: calc(14px * var(--fs, 1)); font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer; }
+
+/* ---------- v126 ปุ่มจดกลางแถบล่าง + แผ่นจด + ออม + ต้องจัดการ ---------- */
+.tabbar a.tb-jod { color: var(--text); font-weight: 600; overflow: visible; }
+.tabbar a.tb-jod span, .tabbar a.tb-jod span.ico {
+  width: 56px; height: 56px; border-radius: 50%; margin-top: -24px;
+  background: var(--ink, #17201b); color: var(--on-ink, #fff);
+  box-shadow: 0 0 0 5px var(--bg), 0 6px 16px -8px rgba(0, 0, 0, .45);
+}
+.tabbar a.tb-jod span.ico svg { width: 26px; height: 26px; stroke-width: 2.3; }
+.tabbar a.tb-jod:active span { transform: scale(.94); }
+body.jod .tabbar a.tb-jod span svg { transform: rotate(45deg); transition: transform .2s; }
+
+/* แผ่นจด: ปกติซ่อน เปิดด้วยปุ่มกลาง */
+body.money .mo-comp { display: none; }
+.jod-h { display: none; }
+body.jod .mo-comp {
+  display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; margin: 0;
+  border-radius: 22px 22px 0 0; border: 0; max-height: 88vh; max-height: 88dvh; overflow-y: auto;
+  padding: 8px 16px calc(18px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 30px -12px rgba(0, 0, 0, .35);
+  animation: jodUp .22s ease-out;
+}
+body.jod .jod-h { display: flex; align-items: center; gap: 8px; position: relative; padding-top: 10px; }
+.jod-grip { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 40px; height: 5px; border-radius: 3px; background: var(--line-strong, #c9d1c8); }
+.jod-h h2 { margin: 0; flex: 1; font-size: calc(19px * var(--fs, 1)); }
+.jod-h button { min-height: 40px; padding: 0 12px; border: 0; background: transparent; color: var(--muted); font-size: calc(14px * var(--fs, 1)); }
+.jod-back { position: fixed; inset: 0; z-index: 55; background: color-mix(in srgb, #08120d 45%, transparent); }
+body.jod { overflow: hidden; }
+body.jod .toast { z-index: 70; }
+@keyframes jodUp { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.jod .mo-comp { animation: none; } body.jod .tabbar a.tb-jod span svg { transition: none; } }
+@media (min-width: 900px) { body.jod .mo-comp { left: 50%; right: auto; width: 480px; transform: translateX(-50%); bottom: 96px; border-radius: 22px; animation: none; } }
+
+/* ต้องจัดการ */
+.mo-todo { margin-bottom: 14px; padding: 12px 14px 6px; }
+.mo-todo h3 { margin: 0 0 4px; font-size: calc(14px * var(--fs, 1)); color: var(--muted); font-weight: 600; }
+.todo-r { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 0; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; color: var(--text); min-height: 48px; }
+.mo-todo h3 + .todo-r { border-top: 0; }
+.todo-r span { flex: 1; display: grid; }
+.todo-r b { font-weight: 600; font-size: calc(14.5px * var(--fs, 1)); }
+.todo-r small { color: var(--muted); font-size: calc(12.5px * var(--fs, 1)); }
+.todo-r em { font-style: normal; font-weight: 600; font-size: calc(13px * var(--fs, 1)); color: var(--warn, #a85a06); background: color-mix(in srgb, var(--warn, #a85a06) 14%, var(--card)); padding: 4px 10px; border-radius: 9px; }
+
+/* ออม */
+.sv-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sv-sum div { display: grid; align-content: start; gap: 2px; }
+.sv-sum div + div { border-left: 1px solid var(--line); padding-left: 14px; }
+.sv-sum small { color: var(--muted); font-size: calc(12.5px * var(--fs, 1)); }
+.sv-sum b { font-size: calc(24px * var(--fs, 1)); font-weight: 700; }
+.sv-note { margin: 4px 4px 0; }
+.goal .mini.buy { background: var(--ink, #17201b); color: var(--on-ink, #fff); border-color: transparent; margin-right: 6px; }
+@media (min-width: 760px) {
+  body.money > #todo { grid-column: 1; grid-row: 4; align-self: start; }
+  body.money > #vSave { grid-column: 2; grid-row: 4 / span 3; }
+}

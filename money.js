@@ -61,13 +61,16 @@ function render() {
   $('#vList').hidden = view !== 'list';
   $('#vCal').hidden = view !== 'cal';
   $('#vChart').hidden = view !== 'chart';
+  $('#vSave').hidden = view !== 'save';
   $('#vOwe').hidden = view !== 'owe';
-  ['#hero', '.mo-comp', '.m-bar'].forEach(q => { const el = $(q); if (el) el.hidden = view === 'owe'; });
+  ['#hero', '.m-bar'].forEach(q => { const el = $(q); if (el) el.hidden = view === 'owe'; });
+  renderTodo();
   if (view === 'owe' && typeof renderOwe === 'function') renderOwe();
   renderBudStrip(mm);
   if (view === 'list') renderList(mm);
   if (view === 'cal') renderCal(mm);
   if (view === 'chart') renderChart(mm);
+  if (view === 'save') renderSave(mm);
 }
 
 /* หมวดทั้งหมดของประเภทนี้: หมวดตั้งต้น + หมวดที่เคยพิมพ์เอง (อื่นๆ อยู่ท้ายสุด) */
@@ -234,7 +237,6 @@ function renderChart(mm) {
   tools.querySelector('#goBud').onclick = openBud;
   tools.querySelector('#goRec').onclick = openRec;
   box.appendChild(tools);
-  box.appendChild(goalCard(mm));
   const bud = budCard(mm);
   if (bud) box.appendChild(bud);
   box.appendChild(catCard('รายจ่ายแยกหมวด', mm.filter(x => x.type === 'out'), 'out'));
@@ -296,9 +298,10 @@ function goalCard(mm) {
     return `<div class="goal" data-i="${i}"><div class="goal-h"><b>${esc(g.name)}</b><span>${baht(g.saved)} <small>/ ${baht(g.target)}</small></span></div>
       <i class="goal-bar"><em style="width:${p}%"></em></i>
       <div class="goal-f"><small>${rest ? (g.by ? `ต้องเก็บเดือนละ ${baht(per)} ถึง ${monthName(g.by)}` : `เหลืออีก ${baht(rest)}`) : '🎉 ครบเป้าแล้ว'}${rest && per && net < per && month === today().slice(0, 7) ? ` · เดือนนี้เหลือ ${baht(net)}` : ''}</small>
-      <span><button type="button" class="mini" data-dep="${i}">＋ เก็บเพิ่ม</button><button type="button" class="link-btn" data-ed="${i}">แก้</button></span></div></div>`;
+      <span>${rest ? '' : `<button type="button" class="mini buy" data-buy="${i}">ซื้อแล้ว</button>`}<button type="button" class="mini" data-dep="${i}">＋ เก็บเพิ่ม</button><button type="button" class="link-btn" data-ed="${i}">แก้</button></span></div></div>`;
   }).join('') : `<p class="hint">ตั้งเป้า เช่น "เที่ยวญี่ปุ่น ฿40,000 ภายใน มี.ค." แล้วบอกได้ว่าต้องเก็บเดือนละเท่าไหร่${net > 0 ? ` · เดือนนี้เหลือ ${baht(net)}` : ''}</p>`);
   c.querySelector('#goalAdd').onclick = () => openGoal(-1);
+  c.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buyGoal(+b.dataset.buy));
   c.querySelectorAll('[data-ed]').forEach(b => b.onclick = () => openGoal(+b.dataset.ed));
   c.querySelectorAll('[data-dep]').forEach(b => b.onclick = () => {
     const g = mcfg.goals[+b.dataset.dep];
@@ -309,6 +312,54 @@ function goalCard(mm) {
     saveGoals(); toast(`🐷 ${g.name} ${a > 0 ? '+' : ''}${baht(a)} → ${baht(g.saved)}`);
   });
   return c;
+}
+/* ซื้อของตามเป้าแล้ว: จดเป็นรายจ่าย (ราคาที่จ่ายจริง) แล้วปิดเป้า · เงินที่เก็บเข้าเป้าก่อนหน้าไม่ได้นับเป็นรายจ่าย จึงนับครั้งเดียวตอนซื้อ */
+async function buyGoal(i) {
+  const g = (mcfg.goals || [])[i];
+  if (!g) return;
+  const v = prompt(`ซื้อ "${g.name}" แล้ว จ่ายจริงเท่าไหร่ (จะจดเป็นรายจ่ายและปิดเป้านี้)`, String(g.target || ''));
+  if (v === null) return;
+  const a = Number(String(v).replace(/[,\s฿]/g, ''));
+  if (!(a > 0)) { showStatus('ใส่ราคาที่จ่ายจริงด้วย'); return; }
+  const x = { id: uid(), type: 'out', date: today(), amount: String(a), note: g.name, cat: guessCat('out', g.name) || 'อื่นๆ', pay: '', file: null, created: new Date().toISOString() };
+  upsert(x);
+  mcfg.goals.splice(i, 1);
+  saveGoals();
+  toast(`🛍 จด ${baht(a)} · ${g.name} และปิดเป้าแล้ว`, () => { del(x.id); mcfg.goals.splice(i, 0, g); saveGoals(); }, () => openDlg(x));
+  try { upsert((await api('money_save', { item: x })).item); render(); }
+  catch (e) { showStatus('จดรายจ่ายไม่สำเร็จ: ' + e.message); }
+}
+/* แท็บ ออม: ยอดรวมที่เก็บไว้ + เดือนนี้ควรเก็บเท่าไหร่ + เป้าแต่ละอัน */
+function renderSave(mm) {
+  const box = $('#vSave'), goals = mcfg.goals || [];
+  box.innerHTML = '';
+  const left = by => { if (!by) return 0; const [y, m] = by.split('-').map(Number), [y0, m0] = today().slice(0, 7).split('-').map(Number); return Math.max(1, (y - y0) * 12 + (m - m0) + 1); };
+  const saved = goals.reduce((t, g) => t + (Number(g.saved) || 0), 0);
+  const need = goals.reduce((t, g) => { const r = Math.max(0, g.target - g.saved), n = left(g.by); return t + (r && n ? Math.ceil(r / n) : 0); }, 0);
+  const net = sum(mm.filter(x => x.type === 'in')) - sum(mm.filter(x => x.type === 'out'));
+  if (goals.length) {
+    const h = document.createElement('section');
+    h.className = 's-card sv-sum';
+    h.innerHTML = `<div><small>ออมไว้รวม</small><b class="in">${baht(saved)}</b></div><div><small>เดือนนี้ควรเก็บ</small><b>${baht(need)}</b>${need && month === today().slice(0, 7) ? `<small>${net >= need ? 'คงเหลือเดือนนี้พอ' : 'คงเหลือเดือนนี้ ' + baht(Math.max(0, net))}</small>` : ''}</div>`;
+    box.appendChild(h);
+  }
+  box.appendChild(goalCard(mm));
+  const p = document.createElement('p');
+  p.className = 'hint sv-note';
+  p.textContent = 'เงินที่เก็บเข้าเป้าไม่นับเป็นรายจ่าย พอซื้อของจริงกด "ซื้อแล้ว" ระบบจดเป็นรายจ่ายและปิดเป้าให้';
+  box.appendChild(p);
+}
+/* ต้องจัดการ: รายการประจำที่ไม่ได้ตั้งให้จดเอง ใกล้ถึงหรือเลยกำหนดเดือนนี้ แตะแล้วเปิดแผ่นจดพร้อมข้อความ */
+function renderTodo() {
+  const box = $('#todo');
+  if (!box) return;
+  const ym = today().slice(0, 7), d = +today().slice(8, 10);
+  const due = view === 'owe' || month !== ym ? [] : (mcfg.recur || []).filter(r => !r.auto && String(r.last || '').slice(0, 7) !== ym && r.day - d <= 3)
+    .filter(r => !items.some(x => inMonth(x, ym) && x.type === (r.type || 'out') && Number(x.amount) === Number(r.amount) && String(x.note || '').includes(String(r.note || '').slice(0, 6))));
+  box.hidden = !due.length;
+  if (!due.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<h3>ต้องจัดการ</h3>` + due.map((r, i) => `<button type="button" class="todo-r" data-i="${i}"><span><b>${esc(r.note)} ${baht(r.amount)}</b><small>รายการประจำ · ${r.day < d ? 'เลยกำหนดวันที่ ' + r.day : r.day === d ? 'ครบกำหนดวันนี้' : 'ครบกำหนดอีก ' + (r.day - d) + ' วัน'}</small></span><em>จดเลย</em></button>`).join('');
+  box.querySelectorAll('[data-i]').forEach(b => b.onclick = () => { const r = due[+b.dataset.i]; qType = r.type || 'out'; qCat = r.cat || ''; render(); openJod(`${r.amount} ${r.note}`); });
 }
 async function saveGoals() {
   LS.set('moneyCfg', mcfg); render();
@@ -430,6 +481,7 @@ $('#mQuick').addEventListener('submit', async e => {
     note: p.note || qCat || (p.type === 'in' ? 'รายรับ' : 'รายจ่าย'), cat: qCat || guessCat(p.type, p.note), pay: '', file: null, created: now };
   $('#mInput').value = '';
   qCat = '';
+  closeJod();
   upsert(x);
   if (!inMonth(x, month)) month = x.date.slice(0, 7);
   render();
@@ -529,6 +581,7 @@ async function del(id) {
 
 /* ---------- 📷 สลิป/ใบเสร็จ ---------- */
 $('#btnSnap').onclick = () => { $('#mFile').value = ''; $('#mFile').click(); };
+$('#mFile').addEventListener('change', () => closeJod());
 $('#mFile').addEventListener('change', async e => {
   const files = [...e.target.files].slice(0, 10);
   if (!files.length) return;
@@ -620,7 +673,8 @@ $('#vTabs').querySelectorAll('button').forEach(c => c.onclick = () => { view = c
 /* แถบบน: รายรับ-จ่าย / หารกัน (หน้าแยก) / ค้างกัน */
 function secFromHash() {
   const h = location.hash.slice(1);
-  if (h === 'owe') view = 'owe';
+  if (h === 'jod') { history.replaceState(null, '', location.pathname + location.search.replace(/[?&]fix=\d+/, '')); if (view === 'owe') view = 'list'; setTimeout(() => openJod(), 0); }
+  else if (h === 'owe') view = 'owe';
   else if ((h === 'money' || h === '') && view === 'owe') view = 'list';   // เปิด money.html (ไม่มี #owe) = หน้าเงินเสมอ แม้ครั้งก่อนอยู่หน้าค้างกัน
   else return false;
   LS.set('moneyView', view);
@@ -635,6 +689,23 @@ document.querySelectorAll('.tabbar a[href="money.html"], .tabbar a[href="money.h
   history.replaceState(null, '', location.pathname + location.search.replace(/[?&]fix=\d+/, '') + (owe ? '#owe' : ''));
   view = owe ? 'owe' : (view === 'owe' ? 'list' : view); LS.set('moneyView', view); render(); window.scrollTo(0, 0);
 }));
+/* 📝 แผ่นจด: ปุ่มกลางแถบล่าง · อยู่หน้านี้ = เปิดแผ่นทับหน้าเดิม (หน้าอื่นลิงก์มาที่ money.html#jod) */
+function openJod(text) {
+  document.body.classList.add('jod');
+  $('#jodBack').hidden = false;
+  if (text !== undefined) $('#mInput').value = text;
+  setTimeout(() => $('#mInput').focus(), 60);
+}
+function closeJod() {
+  if (!document.body.classList.contains('jod')) return;
+  document.body.classList.remove('jod');
+  $('#jodBack').hidden = true;
+  $('#mInput').blur();
+}
+document.querySelectorAll('.tabbar a[href="money.html#jod"]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); document.body.classList.contains('jod') ? closeJod() : openJod(); }));
+$('#jodBack').onclick = closeJod;
+$('#jodClose').onclick = closeJod;
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('jod') && !document.querySelector('dialog[open]')) closeJod(); });
 document.querySelectorAll('#mSec a[href^="money.html#"]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); history.replaceState(null, '', '#' + a.dataset.s); secFromHash(); render(); }));
 $('#btnSync').onclick = sync;
 render();

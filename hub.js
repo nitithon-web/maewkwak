@@ -107,9 +107,10 @@ document.addEventListener('DOMContentLoaded', () => {
     mic: sv('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'),
     split: sv('<path d="M5 12h14"/><circle cx="12" cy="6.3" r="1.5"/><circle cx="12" cy="17.7" r="1.5"/>'),
     cam: sv('<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.5-2h5.6l1.5 2h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.8" r="3.3"/>'),
+    plus: sv('<path d="M12 5v14M5 12h14"/>'),
     pulse: sv('<path d="M3 12h4.2l2.3-5.5 5 11 2.3-5.5H21"/>'),
   };
-  const TAB = { 'money.html': 'money', 'vault.html': 'vault', 'split.html': 'split', 'money.html#owe': 'users' };
+  const TAB = { 'money.html': 'money', 'vault.html': 'vault', 'split.html': 'split', 'money.html#owe': 'users', 'money.html#jod': 'plus' };
   document.querySelectorAll('.tabbar a').forEach(a => { const k = TAB[a.getAttribute('href')], sp = a.querySelector('span'); if (k && sp) { sp.innerHTML = ICO[k]; sp.classList.add('ico'); } });
   document.querySelectorAll('[data-ico]').forEach(el => { if (ICO[el.dataset.ico]) el.innerHTML = ICO[el.dataset.ico]; });
 
@@ -297,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
   /* ---------- 🗒 หน้าว่าง: ไอคอนของหมวด + ปุ่มเริ่มใช้ (ไม่ใส่ปุ่มในผลค้นหาที่ไม่เจอ) ---------- */
   const PAGE = ['money', 'vault', 'split'].find(c => document.body.classList.contains(c));
   const START = {
-    money: ['＋ จดรายการแรก', () => document.getElementById('mInput')],
+    money: ['＋ จดรายการแรก', () => { if (typeof openJod === 'function') { openJod(); return null; } return document.getElementById('mInput'); }],
     vault: ['＋ เพิ่มรหัสแรก', () => document.getElementById('btnAdd'), true],
   };
   function decorateEmpty(root) {
@@ -426,7 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
     history.replaceState(null, '', location.pathname + location.hash);
     setTimeout(() => {
       const focus = sel => { const el = document.querySelector(sel); if (el) { el.scrollIntoView({ block: 'center' }); el.focus(); } return el; };
-      if (DO === 'expense') focus('#mInput');
+      if (DO === 'expense') { if (typeof openJod === 'function') openJod(); else focus('#mInput'); }
       else if (DO === 'snap') {
         // เบราว์เซอร์ไม่ให้เปิดกล้องเองโดยไม่แตะ → ขึ้นปุ่มใหญ่ให้แตะครั้งเดียว
         const btn = document.getElementById('btnSnap');

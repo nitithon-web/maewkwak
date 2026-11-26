@@ -1,21 +1,21 @@
-/* แอปเงิน: ตัวเก็บไฟล์ในเครื่อง (v125)
+/* แอปเงิน: ตัวเก็บไฟล์ในเครื่อง (v126)
  * เปิดจากเครื่องทันที (ไม่รอเน็ต) · ติดตั้งเวอร์ชันใหม่เบื้องหลัง: ดึงทุกไฟล์สด แล้วเช็กลายนิ้วมือ (SHA-1) ต้องตรงชุดทุกไฟล์ ไม่ตรง = ไม่ติดตั้ง (กันไฟล์เก่า/ใหม่ปนกัน)
  * ติดตั้งเสร็จแล้วรอ (หน้าแอปขึ้นแถบ "มีเวอร์ชันใหม่" → แตะ = ข้อความ skip) · hk.html/hk.js (แอปเล็กใน LINE) ใช้เน็ตก่อน ช้าเกิน 3 วิใช้ของในเครื่อง
  * ไฟล์นี้สร้างด้วย build_sw.py (อย่าแก้ HASH เอง) */
-const VER = '125';
+const VER = '126';
 const CACHE = 'ngoen-v' + VER;
 const HASH = {
- "money.html": "59b915acdd35",
- "split.html": "621821fd4546",
- "vault.html": "f68dfdafd8c5",
- "hk.html": "4983b9cc4116",
+ "money.html": "5cf16f3cf898",
+ "split.html": "98396c3ce416",
+ "vault.html": "c51346bc6ec9",
+ "hk.html": "3fba64355b40",
  "hk.js": "01e262ba825b",
  "jod.png": "8817909bb7c3",
  "manifest.json": "9bd7b3b4ea31",
- "style.css": "efe5f82f6ef0",
- "hub.js": "0a78508a4b0a",
+ "style.css": "1c5972fe8392",
+ "hub.js": "82a24516a282",
  "mcore.js": "99b3a7ccfff2",
- "money.js": "8de37a86171e",
+ "money.js": "11485239aac1",
  "owe.js": "dbd85b661984",
  "scat.js": "af401954b3f5",
  "qrcode.js": "e84be42f244b",
