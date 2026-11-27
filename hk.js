@@ -104,6 +104,7 @@ function drawHome() {
       <div class="dark"><div class="lbl">รอรับคืน</div><div class="big">${baht(get)}</div><div class="lbl">${home.get.filter(x => x.leftS).length} บิล · ฉันจ่ายก่อน</div></div>
     </div>
     ${netBlock()}
+    ${(home.unclaimed || []).length ? `<div class="sec list"><div class="sec-h">✋ ชื่อในบิลที่ยังไม่มีเจ้าของ</div><div class="lbl" style="padding:2px 16px 8px">คนจ่ายก่อนพิมพ์ชื่อไว้ ถ้าเป็นคุณ กด "นี่คือฉัน" ยอดจะย้ายมาเป็นของคุณ</div>${home.unclaimed.map((x, i) => `<div class="item"><div class="mid"><div class="nm">${esc(x.name)} · ${baht(x.amtS)}</div><div class="lbl">${esc(x.title)} · ${esc(x.payer)}จ่ายก่อน${x.date ? ' · ' + thDate(x.date) : ''}</div></div><button type="button" class="btn sm" data-claim="${i}">นี่คือฉัน</button></div>`).join('')}</div>` : ''}
     <div class="sec list"><div class="sec-h">ต้องจ่าย</div>${oweRows || '<div class="empty">ไม่มียอดที่ต้องจ่าย</div>'}</div>
     <div class="sec list"><div class="sec-h">รอรับคืน (ฉันจ่ายก่อน)</div>${getRows || '<div class="empty">ยังไม่มีบิลที่คุณจ่ายก่อน</div>'}</div>
     ${home.group ? `<button class="row-btn item" type="button" id="gSum" style="width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;text-align:left;font:inherit;color:inherit"><span style="font-size:22px" aria-hidden="true">📊</span><div class="mid"><div class="nm">สรุปกลุ่มเดือนนี้</div><div class="lbl">ใช้ไปกับอะไร ใครออกก่อนเท่าไร</div></div></button>` : ''}
@@ -111,6 +112,13 @@ function drawHome() {
     ${home.group ? `<div class="sec list"><div class="sec-h">🏦 กองกลางในกลุ่มนี้</div>${(home.pools || []).map(x => `<button class="row-btn item" type="button" data-pool="${esc(x.id)}"><div class="mid"><div class="nm">${esc(x.name)}${x.status === 'closed' ? ' <span class="pill soft">ปิดแล้ว</span>' : ''}</div><div class="lbl">${esc(x.holder)}ถือกอง${x.myBalS ? ' · ของฉัน' + (x.myBalS > 0 ? 'เหลือ ' : 'ใช้เกิน ') + baht(Math.abs(x.myBalS)) : ''}</div></div><div class="amt">${baht(x.leftS)}</div></button>`).join('') || '<div class="empty">ยังไม่มีกองกลาง</div>'}<button class="row-btn item" type="button" id="newPool"><span class="lnk" style="padding:0">+ สร้างกองกลาง (ทุกคนลงเงินก่อน แล้วจ่ายจากกอง)</span></button></div>` : ''}
     ${home.me.ppSet || home.me.qr || home.me.qrImg || home.me.bank ? '' : `<button class="row-btn sec item" type="button" id="setPay"><div class="mid"><div class="nm">ตั้งช่องทางรับเงิน</div><div class="lbl">อัปรูป QR ใส่พร้อมเพย์ หรือเลขบัญชีธนาคาร เพื่อนจะได้จ่ายง่าย</div></div><span class="lnk">ตั้งเลย</span></button>`}`;
   $('#app').querySelectorAll('[data-bill]').forEach(b => b.onclick = () => openBill(b.dataset.bill));
+  $('#app').querySelectorAll('[data-claim]').forEach(btn => btn.onclick = async () => {
+    const x = home.unclaimed[+btn.dataset.claim];
+    if (!x || !confirm(`ยืนยันว่า "${x.name}" ในบิล ${x.title} คือคุณ\nยอด ${baht(x.amtS)} จะย้ายมาอยู่ในยอดที่คุณต้องจ่าย`)) return;
+    btn.disabled = true;
+    try { const r = await call('hk_claim', { b: x.b, k: x.k }); home = r.home; toast(r.claimed); drawHome(); }
+    catch (e) { btn.disabled = false; toast(e.message); }
+  });
   $('#app').querySelectorAll('[data-pool]').forEach(b => b.onclick = () => openPool(b.dataset.pool));
   const gs = $('#gSum'); if (gs) gs.onclick = () => openGsum();
   $('#app').querySelectorAll('[data-rec]').forEach(b => b.onclick = () => recMenu((home.recs || []).find(x => x.id === b.dataset.rec)));
