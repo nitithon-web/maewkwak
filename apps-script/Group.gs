@@ -269,13 +269,13 @@ function grpHandle_(ev) {
   if (ev.type === 'memberJoined' && g && g.on) {   // คนเข้ากลุ่มใหม่ = ชื่อขึ้นให้เลือกตอนหาร
     const add = {};
     ((ev.joined || {}).members || []).forEach(m => { if (m.userId) add[m.userId] = grpName_(src, m.userId); });
-    try { grpLocked_(null, () => { const c2 = grpCfg_(); if (c2[gid]) { c2[gid].seen = Object.assign(c2[gid].seen || {}, add); grpCfgSave_(c2); } }); } catch (e) {}
+    try { grpLocked_(null, () => grpLearn_(gid, add)); } catch (e) {}
     return;
   }
   if (ev.type === 'postback' && String(ev.postback && ev.postback.data) === 'gjoin') {   // ✋ ฉันอยู่ในกลุ่มนี้ (ไม่ตอบ ข้อความที่แตะขึ้นในกลุ่มเองแล้ว)
     if (!g || !g.on || !uid) return;
     const nm = grpName_(src, uid);
-    try { grpLocked_(null, () => { const c2 = grpCfg_(); if (c2[gid]) { c2[gid].seen = c2[gid].seen || {}; c2[gid].seen[uid] = nm; grpCfgSave_(c2); } }); } catch (e) {}
+    try { grpLocked_(null, () => grpLearn_(gid, { [uid]: nm })); } catch (e) {}
     return;
   }
   if (ev.type === 'message' && ev.message && ev.message.type === 'image') {   // 🧾 สลิปในกลุ่ม: อ่านเฉพาะรูปของคนที่ยังค้างในกลุ่มนี้
@@ -308,10 +308,11 @@ function grpHandle_(ev) {
   }
 
   // จำว่าใครอยู่ในกลุ่ม (userId + ชื่อ ไม่เก็บข้อความ) ไว้ให้เลือกตอนหาร
-  if (uid && !(g.seen || {})[uid]) {
-    const nm = grpName_(src, uid);
-    try { grpLocked_(null, () => { const c2 = grpCfg_(); if (c2[gid]) { c2[gid].seen = c2[gid].seen || {}; c2[gid].seen[uid] = nm; grpCfgSave_(c2); } }); } catch (e) {}
-  }
+  // + คนที่ถูกแท็กในข้อความไหนก็ได้ (คุยกันปกติ ไม่ต้องเรียกบอท) · คนใหม่ = ผูกชื่อที่เคยพิมพ์ใส่บิลไว้ให้ (grpLearn_)
+  const learn = {}, known = g.seen || {};
+  if (uid && !known[uid]) learn[uid] = grpName_(src, uid);
+  ((ev.message.mention || {}).mentionees || []).forEach(m => { if (m.type !== 'all' && !m.isSelf && m.userId && !known[m.userId] && !learn[m.userId]) { const nm = grpName_(src, m.userId); if (nm && nm !== 'เพื่อน') learn[m.userId] = nm; } });
+  if (Object.keys(learn).length) { try { grpLocked_(null, () => grpLearn_(gid, learn)); } catch (e) {} }
   if (!text || (!GRP_CMD.test(text) && !tagBot)) return;   // คุยกันทั่วไป = ไม่ยุ่ง
 
   if (/^ปิดหาร$/.test(text)) {
@@ -576,15 +577,64 @@ function grpSetNick_(ev, gid, g, uid, name, ment, isOwner) {
   g.seen = g.seen || {}; g.seen[target] = nick;
   return '👌 ต่อไปจะเรียก "' + nick + '" ทุกกลุ่ม' + hkClaim_(gid, target, nick);
 }
-/** ยอดของคนนอกกลุ่มชื่อเดียวกัน (ที่ยังไม่มีใครจ่ายแทน) ย้ายมาเป็นของบัญชีนี้ */
-function hkClaim_(gid, uid, nick) {
+/** ยอดของคนนอกกลุ่มชื่อเดียวกัน (ที่ยังไม่มีใครจ่ายแทน) ย้ายมาเป็นของบัญชีนี้ · เทียบชื่อแบบไม่สนตัวพิมพ์/เว้นวรรค · alt = ชื่อ LINE อีกชื่อ */
+function hkClaim_(gid, uid, nick, alt) {
+  const want = [nick, alt].map(grpNm_).filter(x => x && x !== grpNm_('เพื่อน'));
+  if (!want.length) return '';
   let moved = 0;
   grpBills_(gid).forEach(b => {
     let ch = false;
-    b.members.forEach(m => { if (!m.uid && m.out && !m.by && m.name === nick && uid !== b.payer.uid && !b.members.some(x => x.k === uid)) { m.uid = uid; m.k = uid; m.out = false; ch = true; moved++; } });
+    b.members.forEach(m => { if (hkCanBind_(b, m, uid) && want.indexOf(grpNm_(m.name)) >= 0) { hkBind_(b, m, uid); ch = true; moved++; } });
     if (ch) grpSave_(b);
   });
   return moved ? '\nย้ายยอดของ +' + nick + ' มาเป็นของบัญชีนี้แล้ว ' + moved + ' บิล' : '';
+}
+function grpNm_(s) { return String(s || '').normalize('NFC').toLowerCase().replace(/[\s.\-_'"+]/g, ''); }
+/** แถวชื่อที่พิมพ์เอง (ไม่มีบัญชี ไม่มีคนจ่ายแทน) ที่บัญชีนี้รับเป็นของตัวเองได้ */
+function hkCanBind_(b, m, uid) {
+  return !!uid && !m.uid && m.out && !m.by && !b.poolRole && b.payer.uid !== uid && !b.members.some(x => x.uid === uid || x.k === uid);
+}
+/** ผูกแถวชื่อที่พิมพ์เองเข้ากับบัญชี LINE · เปลี่ยนคีย์ทุกจุดที่อ้างถึง (เมนู, รายการย่อย, ค้างกันของเจ้าของ) */
+function hkBind_(b, m, uid) {
+  const ok = m.k, swap = arr => (arr || []).map(k => k === ok ? uid : k);
+  m.uid = uid; m.k = uid; m.out = false;
+  (b.items || []).forEach(it => { it.who = swap(it.who); });
+  (b.parts || []).forEach(pt => {
+    ['sh', 'u'].forEach(f => { if (pt[f] && Object.prototype.hasOwnProperty.call(pt[f], ok)) { pt[f][uid] = pt[f][ok]; delete pt[f][ok]; } });
+    (pt.items || []).forEach(it => { it.who = swap(it.who); });
+  });
+  if (b.owe && b.owe.debts && Object.prototype.hasOwnProperty.call(b.owe.debts, ok)) { b.owe.debts[uid] = b.owe.debts[ok]; delete b.owe.debts[ok]; }
+}
+/** (ในล็อก) จำคนในกลุ่ม · คนที่เพิ่งรู้จัก = ผูกชื่อเดียวกันที่พิมพ์ไว้ในบิลที่ยังเปิด */
+function grpLearn_(gid, add) {
+  const c = grpCfg_(), g = c[gid];
+  if (!g) return;
+  g.seen = g.seen || {};
+  const fresh = [];
+  Object.keys(add || {}).forEach(u => { if (!u || !add[u]) return; if (!g.seen[u]) fresh.push(u); delete g.seen[u]; g.seen[u] = add[u]; });
+  grpCfgSave_(c);
+  if (!fresh.length) return;
+  const users = hkUsers_();
+  fresh.forEach(u => { try { hkClaim_(gid, u, add[u], (users[u] || {}).name); } catch (e) { console.warn('grpLearn: ' + e); } });
+}
+/** ✋ นี่คือฉัน: รับชื่อที่คนจ่ายก่อนพิมพ์ไว้ (ชื่อไม่ตรงกับชื่อ LINE) มาเป็นของตัวเอง */
+function hkClaimOne_(me, grp, p) {
+  if (!grp) throw new Error('เปิดหน้านี้จากการ์ดในกลุ่มก่อนนะครับ');
+  const b = hkGet_(p.b, grp);
+  if (b.status !== 'open') throw new Error('บิลนี้ปิดไปแล้ว');
+  const m = b.members.find(x => x.k === String(p.k || ''));
+  if (!m || !hkCanBind_(b, m, me.uid)) throw new Error('ชื่อนี้มีเจ้าของแล้ว หรือคุณอยู่ในบิลนี้อยู่แล้ว');
+  const was = m.name;
+  hkBind_(b, m, me.uid);
+  m.name = me.disp || was;
+  grpSave_(b);
+  return { claimed: '👌 ยอด ' + grpB_(m.amtS) + ' ของ "' + was + '" ในบิล ' + b.title + ' เป็นของคุณแล้ว', home: hkHome_(me, grp) };
+}
+/** ชื่อที่พิมพ์ไว้ในบิลที่ยังเปิดของกลุ่มนี้ ที่คนเปิดเว็บรับเป็นของตัวเองได้ */
+function hkUnclaimed_(gid, uid) {
+  const out = [];
+  grpBills_(gid).forEach(b => b.members.forEach(m => { if (hkCanBind_(b, m, uid) && m.st === 'wait') out.push({ b: b.id, k: m.k, name: m.name, amtS: m.amtS, title: b.title, payer: b.payer.name, date: b.date || '' }); }));
+  return out.slice(0, 12);
 }
 
 /* ===================== ลงหน้าค้างกัน/รายจ่ายของเจ้าของ ===================== */
@@ -740,7 +790,9 @@ function hkApi_(body) {
     me.disp = meU.nick || lineName || 'เพื่อน';
     if (grp) {   // เปิดแอปจากกลุ่ม = ชื่อขึ้นให้เพื่อนเลือกตอนหาร
       const c = grpCfg_(), g = c[grp.gid];
+      const isNew = g && !(g.seen || {})[me.uid];
       if (g && ((g.seen || {})[me.uid] !== me.disp || more)) { g.seen = Object.assign(g.seen || {}, more || {}); g.seen[me.uid] = me.disp; grpCfgSave_(c); grp.g = g; }
+      if (isNew) { try { hkClaim_(grp.gid, me.uid, me.disp, lineName); } catch (e) { console.warn('claim: ' + e); } }
     }
     switch (a) {
       case 'hk_home':   return hkHome_(me, grp);
@@ -761,6 +813,7 @@ function hkApi_(body) {
       case 'hk_rec_set': return hkRecSet_(me, grp, body);
       case 'hk_gsum': { if (!grp) throw new Error('เปิดหน้านี้จากในกลุ่มก่อน'); const ym = /^\d{4}-\d{2}$/.test(String(body.ym || '')) ? body.ym : Utilities.formatDate(new Date(), TZ, 'yyyy-MM'); return { sum: grpMonthSum_(grp.gid, ym), group: grp.g.name || '' }; }
       case 'hk_settle_ok': return hkSettleOk_(me, grp, body);
+      case 'hk_claim':  return hkClaimOne_(me, grp, body);
       case 'hk_refund': return poolRefund_(me, poolGet_(body.p, grp), body);
       case 'hk_void':   {
         const b = hkGet_(body.b, grp);
@@ -840,6 +893,7 @@ function hkHome_(me, grp) {
     res.group = { name: grp.g.name || '', members: Object.keys(seen).filter(u => u !== me.uid).map(u => ({ uid: u, name: seen[u] })) };
     res.hist = grpHistList_(grp.gid, all);
     res.recs = grpRecList_(grp.gid, me.uid, all);
+    res.unclaimed = hkUnclaimed_(grp.gid, me.uid);
     res.net = grpNet_(grp.gid, me.uid, rows, seen).map(x => Object.assign(x, x.netS > 0 ? { pay: hkPayInfo_(x.uid) } : {}));
     res.pools = poolList_(grp.gid, all).filter(x => poolIn_(x, me.uid) && (x.status === 'open' || daysBetween_(String(x.closed || x.created).slice(0, 10), today) <= 14)).map(x => poolBrief_(x, me, rows));
   }
